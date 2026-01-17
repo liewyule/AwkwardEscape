@@ -41,6 +41,8 @@ export default function RootLayout() {
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="persona" options={{ headerShown: false }} />
+        <Stack.Screen name="mode" options={{ headerShown: false }} />
         <Stack.Screen
           name="incoming-call"
           options={{ presentation: 'fullScreenModal', headerShown: false }}

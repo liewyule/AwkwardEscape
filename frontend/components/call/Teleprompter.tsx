@@ -12,7 +12,7 @@ export function Teleprompter({ turns, activeIndex }: TeleprompterProps) {
   const listRef = useRef<FlatList<ScriptTurn>>(null);
 
   useEffect(() => {
-    if (!listRef.current || activeIndex < 0) {
+    if (!listRef.current || activeIndex < 0 || turns.length === 0) {
       return;
     }
 

@@ -1,64 +1,62 @@
-import type { ScriptTurn } from '@/types/call';
+export type RelationshipType =
+  | 'boss'
+  | 'parent'
+  | 'sibling'
+  | 'friend'
+  | 'landlord'
+  | 'partner'
+  | 'other';
 
-export type Persona = {
+export type PersonaProfile = {
   id: string;
-  name: string;
-  summary: string;
-  systemPrompt: string;
-  fallbackScript: ScriptTurn[];
+  displayName: string;
+  relationshipType: RelationshipType;
+  defaultTheme?: string;
 };
 
-export const PERSONAS: Persona[] = [
+export const RELATIONSHIP_OPTIONS: RelationshipType[] = [
+  'boss',
+  'parent',
+  'sibling',
+  'friend',
+  'landlord',
+  'partner',
+  'other',
+];
+
+export const RELATIONSHIP_LABELS: Record<RelationshipType, string> = {
+  boss: 'Boss',
+  parent: 'Parent',
+  sibling: 'Sibling',
+  friend: 'Friend',
+  landlord: 'Landlord',
+  partner: 'Partner',
+  other: 'Other',
+};
+
+export const DEFAULT_PERSONAS: PersonaProfile[] = [
   {
-    id: 'panicked-roommate',
-    name: 'Panicked Roommate',
-    summary: 'Locked out and frantic about a missing key.',
-    systemPrompt:
-      'You are an urgent caller pretending to be a panicked roommate. Create 3-4 short dialogue turns alternating between Caller and You. The tone should be urgent but believable. Keep the language natural and avoid slang. Return JSON only: {"turns":[{"speaker":"Caller|You","text":"...","pauseMs":300}]}.',
-    fallbackScript: [
-      { speaker: 'Caller', text: 'Hey, I am locked out and the spare key is missing. Are you close?' },
-      { speaker: 'You', text: 'I am in a meeting. Can I call you back in ten?' },
-      { speaker: 'Caller', text: 'Please, I just need you to open the door. It will take one minute.' },
-      { speaker: 'You', text: 'I will be there as soon as I can. I have to step out now.' },
-    ],
+    id: '0a0f6e35-0b4b-4215-9c08-0c5d9bc7b709',
+    displayName: 'Strict Boss',
+    relationshipType: 'boss',
+    defaultTheme: 'urgent work update',
   },
   {
-    id: 'strict-boss',
-    name: 'Strict Boss',
-    summary: 'A manager demanding an immediate update.',
-    systemPrompt:
-      'You are a strict boss calling about a critical deadline. Create 3-4 short dialogue turns alternating between Caller and You. The tone should be firm, clipped, and urgent. Return JSON only: {"turns":[{"speaker":"Caller|You","text":"...","pauseMs":300}]}.',
-    fallbackScript: [
-      { speaker: 'Caller', text: 'Where is the latest status? The client is asking right now.' },
-      { speaker: 'You', text: 'I am pulling the final numbers. I will send them shortly.' },
-      { speaker: 'Caller', text: 'I need them in five minutes. Please step out and deliver.' },
-      { speaker: 'You', text: 'Understood. I am heading out to handle it.' },
-    ],
+    id: '2c1e9c1b-6b9a-4e16-86fe-1b4dd6a04e8e',
+    displayName: 'Panicked Roommate',
+    relationshipType: 'friend',
+    defaultTheme: 'locked out of the apartment',
   },
   {
-    id: 'landlord',
-    name: 'The Landlord',
-    summary: 'Urgent maintenance issue at home.',
-    systemPrompt:
-      'You are a landlord reporting an urgent maintenance issue (leak, alarm, power). Create 3-4 short dialogue turns alternating between Caller and You. The tone should be urgent but polite. Return JSON only: {"turns":[{"speaker":"Caller|You","text":"...","pauseMs":300}]}.',
-    fallbackScript: [
-      { speaker: 'Caller', text: 'Hi, there is water leaking from the upstairs unit. We need you back.' },
-      { speaker: 'You', text: 'I can step away. Is the main valve accessible?' },
-      { speaker: 'Caller', text: 'Yes, but we need your approval for the plumber now.' },
-      { speaker: 'You', text: 'Approve it and I will be on my way.' },
-    ],
+    id: '0e3b0f2a-94f2-49b5-8aa8-8d4cfd8434ac',
+    displayName: 'The Landlord',
+    relationshipType: 'landlord',
+    defaultTheme: 'water leak at home',
   },
   {
-    id: 'childcare',
-    name: 'Childcare Emergency',
-    summary: 'School requesting immediate pickup.',
-    systemPrompt:
-      'You are a school admin calling about a child needing immediate pickup. Create 3-4 short dialogue turns alternating between Caller and You. The tone should be concerned and professional. Return JSON only: {"turns":[{"speaker":"Caller|You","text":"...","pauseMs":300}]}.',
-    fallbackScript: [
-      { speaker: 'Caller', text: 'Hello, this is the front office. Your child is not feeling well.' },
-      { speaker: 'You', text: 'I understand. I will come pick them up now.' },
-      { speaker: 'Caller', text: 'We will wait at the main entrance. Please arrive soon.' },
-      { speaker: 'You', text: 'Thank you. I am stepping out immediately.' },
-    ],
+    id: 'f7f1d6a2-4c15-4b38-a147-41ac750c2db4',
+    displayName: 'School Admin',
+    relationshipType: 'parent',
+    defaultTheme: 'child pickup',
   },
 ];

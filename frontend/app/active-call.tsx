@@ -3,8 +3,8 @@ import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { StatusBar } from 'expo-status-bar';
 
-import { PERSONAS } from '@/constants/personas';
 import { VOICES } from '@/constants/voices';
 import { useCallStore } from '@/features/callLogic';
 import { playScript, stopTTS } from '@/services/ttsEngine';
@@ -34,15 +34,16 @@ export default function ActiveCallScreen() {
     isSpeakerOn,
     toggleMute,
     toggleSpeaker,
+    activePersona,
   } = useCallStore();
-  const { personaId, voiceId } = useSettingsStore();
+  const { personas, selectedPersonaId, voiceId } = useSettingsStore();
   const [elapsed, setElapsed] = useState('00:00');
   const [keypadOpen, setKeypadOpen] = useState(false);
   const [dialed, setDialed] = useState('');
 
   const persona = useMemo(
-    () => PERSONAS.find((item) => item.id === personaId) ?? PERSONAS[0],
-    [personaId]
+    () => activePersona ?? personas.find((item) => item.id === selectedPersonaId) ?? personas[0],
+    [activePersona, personas, selectedPersonaId]
   );
 
   useEffect(() => {
@@ -74,15 +75,22 @@ export default function ActiveCallScreen() {
     router.replace('/(tabs)');
   };
 
+  useEffect(() => {
+    return () => {
+      stopTTS();
+      void endCall();
+    };
+  }, [endCall]);
+
   return (
     <View style={styles.container}>
+      <StatusBar style="light" />
       <LinearGradient colors={['#040509', '#0B1320', '#1E293B']} style={styles.background} />
 
       <View style={styles.header}>
-        <Text style={styles.name}>{persona.name}</Text>
+        <Text style={styles.name}>{persona.displayName}</Text>
         <Text style={styles.timer}>{elapsed}</Text>
-        <View style={styles.micMeter}
-          >
+        <View style={styles.micMeter}>
           <View
             style={[
               styles.micFill,

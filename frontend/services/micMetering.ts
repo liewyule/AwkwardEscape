@@ -60,3 +60,72 @@ export async function stopMicMetering() {
     recording = null;
   }
 }
+
+type VoiceDetectOptions = {
+  timeoutMs?: number;
+  thresholdDb?: number;
+  framesRequired?: number;
+  sampleEveryMs?: number;
+};
+
+export async function detectVoiceActivity(options: VoiceDetectOptions = {}) {
+  const {
+    timeoutMs = 7000,
+    thresholdDb = -40,
+    framesRequired = 4,
+    sampleEveryMs = 200,
+  } = options;
+
+  await stopMicMetering();
+
+  const permission = await Audio.requestPermissionsAsync();
+  if (!permission.granted) {
+    return { permissionGranted: false, voiceDetected: false };
+  }
+
+  await Audio.setAudioModeAsync({
+    allowsRecordingIOS: true,
+    playsInSilentModeIOS: true,
+  });
+
+  const detector = new Audio.Recording();
+  let voiceDetected = false;
+  let frames = 0;
+
+  try {
+    await detector.prepareToRecordAsync(recordingOptions);
+    await detector.startAsync();
+
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs && !voiceDetected) {
+      const status = await detector.getStatusAsync();
+      if (status.isRecording && typeof status.metering === 'number') {
+        if (status.metering > thresholdDb) {
+          frames += 1;
+          if (frames >= framesRequired) {
+            voiceDetected = true;
+            break;
+          }
+        } else {
+          frames = 0;
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, sampleEveryMs));
+    }
+  } catch {
+    voiceDetected = false;
+  } finally {
+    try {
+      await detector.stopAndUnloadAsync();
+    } catch {
+      // Ignore teardown errors
+    }
+    try {
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
+    } catch {
+      // Ignore audio mode reset errors
+    }
+  }
+
+  return { permissionGranted: true, voiceDetected };
+}

@@ -4,42 +4,12 @@ AwkwardEscape is a "Social Emergency Exit" app that simulates incoming calls and
 
 ## Features
 
-- High-fidelity incoming call UI with ringing, vibration, and answer/decline flow
-- Live Teleprompter overlay synced with the caller TTS
-- Persona Engine with LLM-driven scripts + reliable fallbacks
-- Fake message mode using local notifications
-- Supabase-ready Auth + cloud persona storage (no complex backend)
-
-## Install dependencies
-
-Run these once after cloning:
-
-```bash
-npm install
-
-# Expo native modules
-npx expo install expo-av expo-speech expo-notifications expo-linear-gradient expo-font
-
-# Fonts
-npm install @expo-google-fonts/space-grotesk
-
-# State + storage
-npm install zustand @react-native-async-storage/async-storage
-
-# LLM + backend
-npm install groq-sdk @supabase/supabase-js
-```
-
-## Environment variables
-
-Create a `.env` file at `frontend/.env`:
-
-```bash
-EXPO_PUBLIC_GROQ_API_KEY=your_groq_key
-EXPO_PUBLIC_GCP_TTS_API_KEY=your_google_cloud_tts_key
-EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-EXPO_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
-```
+- Hold-to-escape Home flow (2s press-and-hold with progress)
+- Persona manager (add/select/delete) with local persistence
+- Three modes: silent message, instant call, voice-guard call
+- Incoming call UI with ringing, vibration, and answer/decline flow
+- Teleprompter + TTS during active calls
+- Offline-friendly script generation with optional Groq/LLM support
 
 ## Run the app
 
@@ -53,64 +23,44 @@ Open with:
 - Android emulator
 - Expo Go (limited permissions for mic/notifications)
 
-## Supabase setup (custom personas)
+## Environment variables (optional)
 
-1. Create a Supabase project.
-2. In SQL Editor, create a `personas` table:
+Create a `.env` file at `frontend/.env` if you want LLM or Google TTS:
 
-```sql
-create table personas (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid references auth.users not null,
-  name text not null,
-  summary text,
-  system_prompt text not null,
-  created_at timestamp with time zone default now()
-);
+```bash
+EXPO_PUBLIC_GROQ_API_KEY=your_groq_key
+EXPO_PUBLIC_GCP_TTS_API_KEY=your_google_cloud_tts_key
 ```
 
-3. Enable Row Level Security (RLS):
+The app works without any external keys by using offline templates + Expo Speech.
 
-```sql
-alter table personas enable row level security;
-```
+## New flow (Home -> Personas/Modes)
 
-4. Add policies (read + write per user):
+1. Home screen shows a single Hold-to-Escape button.
+2. Tap the top-right menu to manage Personas or Modes.
+3. Press and hold for 2 seconds to trigger the current mode:
+   - Silent message: schedules a local notification.
+   - Instant loud call: immediately shows the incoming call screen.
+   - Voice guard: listens for 7 seconds and triggers a call only if no voice is detected.
 
-```sql
-create policy "Users can read their personas"
-  on personas for select
-  using (auth.uid() = user_id);
+## Permissions
 
-create policy "Users can insert their personas"
-  on personas for insert
-  with check (auth.uid() = user_id);
-```
-
-5. In the app, use `services/supabaseClient.ts` for auth and querying.
+- Microphone permission is required for the Voice Guard mode.
+- Notification permission is required for Silent Message mode.
 
 ## Project structure (key files)
 
-- `app/(tabs)/index.tsx` � Home screen with Panic trigger
-- `app/incoming-call.tsx` � High-fidelity incoming call UI
-- `app/active-call.tsx` � Active call UI + Teleprompter
-- `features/callLogic.ts` � Call state machine and audio/vibration orchestration
-- `services/scriptEngine.ts` � Groq SDK generation + fallback scripts
-- `constants/personas.ts` � Built-in persona profiles
-
-## How to run successfully (full guide)
-
-1. Install dependencies and native modules (see above).
-2. Add `.env` with Groq + Supabase keys.
-3. Ensure `app.json` permissions are set (microphone + notifications).
-4. Start Expo: `npx expo start`.
-5. Use a real device for mic metering and notifications for best results.
-6. On the Home screen, hold the Panic button for 2 seconds to arm a 5-second countdown.
-7. The app auto-starts ringing. Tap Accept to begin the call and Teleprompter.
-8. End the call to reset the state.
+- `app/(tabs)/index.tsx` Home screen with Hold-to-Escape
+- `app/persona.tsx` Personas CRUD + selection
+- `app/mode.tsx` Mode selection
+- `app/incoming-call.tsx` Incoming call UI
+- `app/active-call.tsx` Active call + teleprompter
+- `features/callLogic.ts` Call state + ringtone + mic metering
+- `services/scriptEngine.ts` Script generation + offline templates
+- `store/settingsStore.ts` Persona/mode persistence
 
 ## Notes
 
-- TTS starts only after the user answers the call.
-- If Groq is offline or the key is missing, the app uses built-in fallback scripts.
+- Each escape trigger generates a fresh script with a unique seed.
+- If Groq is offline or the key is missing, fallback templates rotate to avoid repeats.
 - Settings persist locally via AsyncStorage.

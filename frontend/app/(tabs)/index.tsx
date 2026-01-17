@@ -1,211 +1,241 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { Animated, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { StatusBar } from 'expo-status-bar';
 
-import { PERSONAS } from '@/constants/personas';
 import { useCallStore } from '@/features/callLogic';
 import { scheduleFakeMessage } from '@/services/notificationEngine';
+import { detectVoiceActivity } from '@/services/micMetering';
+import { generateMessageText } from '@/services/scriptEngine';
 import { useSettingsStore } from '@/store/settingsStore';
-import { useSilenceTrigger } from '@/components/useSilenceTrigger';
 
-const COUNTDOWN_SECONDS = 5;
-
-function SilenceTriggerListener({ onSilence }: { onSilence: () => void }) {
-  const { meterDb, silenceElapsedMs, silenceMs, silenceDbThreshold } = useSilenceTrigger({
-    onSilence,
-    silenceMs: 5000,
-  });
-  const elapsedSeconds = (silenceElapsedMs / 1000).toFixed(1);
-  const targetSeconds = (silenceMs / 1000).toFixed(1);
-  const meterLabel = meterDb === null ? '—' : `${meterDb.toFixed(0)} dB`;
-
-  return (
-    <View style={styles.silenceStatus}>
-      <Text style={styles.silenceText}>
-        Silence: {elapsedSeconds}s / {targetSeconds}s
-      </Text>
-      <Text style={styles.silenceText}>
-        Level: {meterLabel} (trigger below {silenceDbThreshold} dB)
-      </Text>
-    </View>
-  );
-}
+const HOLD_DURATION_MS = 2000;
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { setCountdown, startRinging } = useCallStore();
-  const { mode, setMode, personaId, setPersonaId } = useSettingsStore();
-  const [countdown, setCountdownState] = useState(0);
-  const [messageQueued, setMessageQueued] = useState(false);
-  const [silenceEnabled, setSilenceEnabled] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const countdownRef = useRef(0);
+  const { startRinging } = useCallStore();
+  const { personas, selectedPersonaId, selectedMode } = useSettingsStore();
+
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [statusNote, setStatusNote] = useState<string | null>(null);
+  const [isHolding, setIsHolding] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  const progress = useRef(new Animated.Value(0)).current;
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdCompletedRef = useRef(false);
+  const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const selectedPersona = useMemo(
-    () => PERSONAS.find((item) => item.id === personaId) ?? PERSONAS[0],
-    [personaId]
+    () => personas.find((persona) => persona.id === selectedPersonaId) ?? personas[0],
+    [personas, selectedPersonaId]
   );
 
-  const handleSilenceTrigger = useCallback(() => {
-    startRinging(selectedPersona.id).then(() => {
-      router.push('/call/incoming');
-    });
-  }, [router, selectedPersona.id, startRinging]);
+  const setStatus = useCallback((message: string | null, durationMs = 2200) => {
+    if (statusTimerRef.current) {
+      clearTimeout(statusTimerRef.current);
+    }
+    setStatusNote(message);
+    if (message && durationMs > 0) {
+      statusTimerRef.current = setTimeout(() => setStatusNote(null), durationMs);
+    }
+  }, []);
 
   useEffect(() => {
     return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
+      if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+      if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
     };
   }, []);
 
-  const startCountdown = () => {
-    if (countdown > 0) {
+  const resetProgress = useCallback(() => {
+    Animated.timing(progress, {
+      toValue: 0,
+      duration: 180,
+      useNativeDriver: false,
+    }).start();
+  }, [progress]);
+
+  const triggerEscape = useCallback(async () => {
+    if (!selectedPersona) {
+      setStatus('Add a persona to continue.');
+      resetProgress();
       return;
     }
 
-    setCountdownState(COUNTDOWN_SECONDS);
-    setCountdown(COUNTDOWN_SECONDS);
-    countdownRef.current = COUNTDOWN_SECONDS;
+    setIsProcessing(true);
 
-    timerRef.current = setInterval(async () => {
-      countdownRef.current -= 1;
-      const next = countdownRef.current;
-      setCountdownState(next);
-      setCountdown(next);
-
-      if (next <= 0) {
-        if (timerRef.current) {
-          clearInterval(timerRef.current);
-        }
-        timerRef.current = null;
-        countdownRef.current = 0;
-
-        if (mode === 'message') {
-          scheduleFakeMessage(
-            selectedPersona.name,
-            'Urgent: can you step out for a minute? I need to talk.'
-          );
-          setMessageQueued(true);
-          setTimeout(() => setMessageQueued(false), 2000);
-          return;
-        }
-
-        startRinging(selectedPersona.id).then(() => {
-          router.push('/incoming-call');
-        });
+    try {
+      if (selectedMode === 'silent_message') {
+        const seed = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        const message = await generateMessageText(selectedPersona, seed);
+        await scheduleFakeMessage(selectedPersona.displayName, message);
+        setStatus('Silent message scheduled.');
+        return;
       }
-    }, 1000);
-  };
 
-  const cancelCountdown = () => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
+      if (selectedMode === 'instant_call') {
+        await startRinging(selectedPersona, selectedMode);
+        router.push('/incoming-call');
+        return;
+      }
+
+      setStatus('Listening for voice for 7 seconds...', 0);
+      const result = await detectVoiceActivity({
+        timeoutMs: 7000,
+        thresholdDb: -40,
+        framesRequired: 4,
+      });
+
+      if (!result.permissionGranted) {
+        setStatus('Mic permission is required for voice detection.');
+        return;
+      }
+
+      if (result.voiceDetected) {
+        setStatus('Voice detected. Call not started.');
+        return;
+      }
+
+      setStatus('No voice detected. Starting call...');
+      await startRinging(selectedPersona, selectedMode);
+      router.push('/incoming-call');
+    } finally {
+      setIsProcessing(false);
+      resetProgress();
     }
-    timerRef.current = null;
-    setCountdownState(0);
-    setCountdown(0);
-    countdownRef.current = 0;
-  };
+  }, [resetProgress, router, selectedMode, selectedPersona, setStatus, startRinging]);
+
+  const beginHold = useCallback(() => {
+    if (isProcessing || isHolding) return;
+
+    holdCompletedRef.current = false;
+    setIsHolding(true);
+
+    Animated.timing(progress, {
+      toValue: 1,
+      duration: HOLD_DURATION_MS,
+      useNativeDriver: false,
+    }).start();
+
+    holdTimerRef.current = setTimeout(() => {
+      holdCompletedRef.current = true;
+      setIsHolding(false);
+      holdTimerRef.current = null;
+      void triggerEscape();
+    }, HOLD_DURATION_MS);
+  }, [isHolding, isProcessing, progress, triggerEscape]);
+
+  const cancelHold = useCallback(() => {
+    if (holdCompletedRef.current) return;
+
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+
+    setIsHolding(false);
+    resetProgress();
+  }, [resetProgress]);
+
+  const progressWidth = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 220],
+  });
 
   return (
     <View style={styles.container}>
+      <StatusBar style="dark" />
+      <View style={styles.background} />
       <LinearGradient
-        colors={['#0B0F1A', '#111927', '#1B2735']}
-        style={StyleSheet.absoluteFillObject}
+        colors={['rgba(125, 211, 252, 0.35)', 'rgba(255, 255, 255, 0)']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.edgeGlow}
       />
-      <View style={styles.glow} />
+      <View style={styles.skyBlobTop} />
+      <View style={styles.skyBlobBottom} />
+
       <View style={styles.header}>
         <View>
-          <Text style={styles.title}>AwkwardEscape</Text>
+          <Text style={styles.title}>Awkward Escape</Text>
           <Text style={styles.subtitle}>Social Emergency Exit</Text>
         </View>
-        <Pressable onPress={() => router.push('/settings')} style={styles.settingsButton}>
-          <Ionicons name="settings-outline" size={22} color="#E2E8F0" />
+
+        <Pressable style={styles.menuButton} onPress={() => setMenuVisible(true)}>
+          <Ionicons name="ellipsis-horizontal" size={22} color="#0F172A" />
         </Pressable>
       </View>
 
-      <View style={styles.panel}>
-        <Text style={styles.panelLabel}>Mode</Text>
-        <View style={styles.toggleRow}>
-          <Text style={styles.modeText}>Silent (Message)</Text>
-          <Switch
-            value={mode === 'call'}
-            onValueChange={(value) => setMode(value ? 'call' : 'message')}
-            trackColor={{ false: '#2B394A', true: '#F97316' }}
-            thumbColor={mode === 'call' ? '#FDE68A' : '#E2E8F0'}
-          />
-          <Text style={styles.modeText}>Loud (Call)</Text>
-        </View>
-      </View>
-
-      <View style={styles.panel}>
-        <Text style={styles.panelLabel}>Silence Trigger</Text>
-        <View style={styles.toggleRow}>
-          <Text style={styles.modeText}>Standby off</Text>
-          <Switch
-            value={silenceEnabled}
-            onValueChange={setSilenceEnabled}
-            trackColor={{ false: '#2B394A', true: '#22C55E' }}
-            thumbColor={silenceEnabled ? '#DCFCE7' : '#E2E8F0'}
-          />
-          <Text style={styles.modeText}>Standby on</Text>
-        </View>
-        {silenceEnabled && <SilenceTriggerListener onSilence={handleSilenceTrigger} />}
-      </View>
-
-      <View style={styles.personaPanel}>
-        <Text style={styles.panelLabel}>Persona</Text>
-        <View style={styles.personaRow}>
-          {PERSONAS.map((persona) => {
-            const active = persona.id === personaId;
-            return (
-              <Pressable
-                key={persona.id}
-                onPress={() => setPersonaId(persona.id)}
-                style={[styles.personaChip, active && styles.personaChipActive]}>
-                <Text style={[styles.personaName, active && styles.personaNameActive]}>
-                  {persona.name}
-                </Text>
-                <Text style={styles.personaSummary}>{persona.summary}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      </View>
-
-      <View style={styles.buttonWrap}>
+      <View style={styles.centerContent}>
         <Pressable
+          onPressIn={beginHold}
+          onPressOut={cancelHold}
+          disabled={isProcessing}
           style={({ pressed }) => [
             styles.panicButton,
-            pressed && { transform: [{ scale: 0.98 }] },
-          ]}
-          onLongPress={startCountdown}
-          delayLongPress={2000}>
-          <LinearGradient
-            colors={['#F97316', '#FB7185', '#FDE68A']}
-            style={styles.panicGlow}
+            pressed && !isProcessing && { transform: [{ scale: 0.98 }] },
+            isProcessing && { opacity: 0.8 },
+          ]}>
+          <Animated.View
+            style={[
+              styles.panicFill,
+              {
+                height: progress.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0, 220],
+                }),
+              },
+            ]}
           />
-          <Text style={styles.panicText}>Hold to Escape</Text>
-          <Text style={styles.panicHint}>Hold for 2 seconds</Text>
+          <Text style={styles.panicText}>{isProcessing ? 'Working...' : 'Hold to Escape'}</Text>
+          <Text style={styles.panicHint}>{isHolding ? 'Keep holding...' : 'Hold for 2 seconds'}</Text>
         </Pressable>
-        {countdown > 0 && (
-          <View style={styles.countdownOverlay}>
-            <Text style={styles.countdownText}>{countdown}</Text>
-            <Pressable onPress={cancelCountdown} style={styles.cancelButton}>
-              <Text style={styles.cancelText}>Cancel</Text>
-            </Pressable>
-          </View>
+
+        <View style={styles.progressTrack}>
+          <Animated.View style={[styles.progressFill, { width: progressWidth }]} />
+        </View>
+
+        {selectedPersona && (
+          <Text style={styles.activeMeta}>
+            Active: {selectedPersona.displayName}
+          </Text>
         )}
+
+        {statusNote && <Text style={styles.statusNote}>{statusNote}</Text>}
       </View>
 
-      {messageQueued && (
-        <Text style={styles.armedNote}>Fake message scheduled.</Text>
-      )}
+      <Modal
+        visible={menuVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMenuVisible(false)}>
+        <Pressable style={styles.menuBackdrop} onPress={() => setMenuVisible(false)}>
+          <Pressable style={styles.menuSheet} onPress={() => {}}>
+            <Pressable
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuVisible(false);
+                router.push('/persona');
+              }}>
+              <Text style={styles.menuText}>Personas</Text>
+              <Ionicons name="chevron-forward" size={18} color="#0F172A" />
+            </Pressable>
 
+            <Pressable
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuVisible(false);
+                router.push('/mode');
+              }}>
+              <Text style={styles.menuText}>Modes</Text>
+              <Ionicons name="chevron-forward" size={18} color="#0F172A" />
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -213,191 +243,155 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingTop: 70,
+    paddingTop: 68,
     paddingHorizontal: 24,
+    backgroundColor: '#FFFFFF',
   },
-  glow: {
+  background: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#FFFFFF',
+  },
+  edgeGlow: {
+    position: 'absolute',
+    top: -60,
+    left: -40,
+    right: -40,
+    height: 220,
+    opacity: 0.6,
+  },
+  skyBlobTop: {
     position: 'absolute',
     top: -120,
-    right: -80,
+    right: -60,
+    width: 220,
+    height: 220,
+    borderRadius: 140,
+    backgroundColor: 'rgba(125, 211, 252, 0.25)',
+  },
+  skyBlobBottom: {
+    position: 'absolute',
+    bottom: -140,
+    left: -80,
     width: 260,
     height: 260,
-    borderRadius: 140,
-    backgroundColor: 'rgba(248, 113, 113, 0.35)',
-    shadowColor: '#F97316',
-    shadowOpacity: 0.8,
-    shadowRadius: 80,
+    borderRadius: 160,
+    backgroundColor: 'rgba(186, 230, 253, 0.3)',
   },
   header: {
-    marginBottom: 24,
+    marginBottom: 20,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
   },
   title: {
-    color: '#F8FAFC',
-    fontSize: 34,
+    color: '#0F172A',
+    fontSize: 30,
     fontFamily: 'SpaceGrotesk_600SemiBold',
-    letterSpacing: 0.5,
   },
   subtitle: {
-    color: '#94A3B8',
+    color: '#64748B',
     marginTop: 6,
-    fontSize: 14,
+    fontSize: 12,
     fontFamily: 'SpaceGrotesk_400Regular',
     textTransform: 'uppercase',
     letterSpacing: 1.4,
   },
-  settingsButton: {
+  menuButton: {
     width: 42,
     height: 42,
     borderRadius: 21,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+    backgroundColor: '#F1F5F9',
     borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.3)',
+    borderColor: 'rgba(148, 163, 184, 0.25)',
   },
-  panel: {
-    backgroundColor: 'rgba(15, 23, 42, 0.7)',
-    borderRadius: 18,
-    padding: 16,
-    marginBottom: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.2)',
-  },
-  panelLabel: {
-    color: '#E2E8F0',
-    fontSize: 12,
-    fontFamily: 'SpaceGrotesk_600SemiBold',
-    textTransform: 'uppercase',
-    letterSpacing: 1.2,
-    marginBottom: 10,
-  },
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  modeText: {
-    color: '#CBD5F5',
-    fontSize: 12,
-    fontFamily: 'SpaceGrotesk_400Regular',
-  },
-  personaPanel: {
-    marginBottom: 24,
-  },
-  personaRow: {
-    gap: 12,
-  },
-  personaChip: {
-    padding: 14,
-    borderRadius: 16,
-    backgroundColor: 'rgba(30, 41, 59, 0.6)',
-    borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.2)',
-  },
-  personaChipActive: {
-    borderColor: '#F97316',
-    backgroundColor: 'rgba(249, 115, 22, 0.16)',
-  },
-  personaName: {
-    color: '#E2E8F0',
-    fontSize: 15,
-    fontFamily: 'SpaceGrotesk_600SemiBold',
-  },
-  personaNameActive: {
-    color: '#FDE68A',
-  },
-  personaSummary: {
-    marginTop: 6,
-    color: '#94A3B8',
-    fontSize: 12,
-    fontFamily: 'SpaceGrotesk_400Regular',
-  },
-  buttonWrap: {
+  centerContent: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    flex: 1,
+    gap: 18,
   },
   panicButton: {
-    width: 240,
-    height: 240,
-    borderRadius: 140,
+    width: 220,
+    height: 220,
+    borderRadius: 120,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#0F172A',
-    borderWidth: 2,
-    borderColor: 'rgba(253, 224, 71, 0.6)',
-    shadowColor: '#F97316',
-    shadowOpacity: 0.6,
-    shadowRadius: 30,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.35)',
+    shadowColor: '#94A3B8',
+    shadowOpacity: 0.25,
+    shadowRadius: 18,
+    overflow: 'hidden',
   },
-  panicGlow: {
+  panicFill: {
     position: 'absolute',
-    width: 260,
-    height: 260,
-    borderRadius: 140,
-    opacity: 0.35,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(56, 189, 248, 0.3)',
   },
   panicText: {
-    color: '#FDE68A',
+    color: '#0F172A',
     fontSize: 20,
     fontFamily: 'SpaceGrotesk_600SemiBold',
   },
   panicHint: {
     marginTop: 8,
-    color: '#CBD5F5',
+    color: '#64748B',
     fontSize: 12,
     fontFamily: 'SpaceGrotesk_400Regular',
   },
-  countdownOverlay: {
-    position: 'absolute',
-    alignItems: 'center',
-    justifyContent: 'center',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    backgroundColor: 'rgba(8, 11, 18, 0.75)',
-    borderRadius: 140,
-  },
-  countdownText: {
-    color: '#FDE68A',
-    fontSize: 54,
-    fontFamily: 'SpaceGrotesk_600SemiBold',
-  },
-  cancelButton: {
-    marginTop: 14,
-    paddingHorizontal: 18,
-    paddingVertical: 8,
+  progressTrack: {
+    width: 220,
+    height: 6,
     borderRadius: 999,
+    backgroundColor: 'rgba(148, 163, 184, 0.25)',
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: 'rgba(56, 189, 248, 0.8)',
+  },
+  activeMeta: {
+    color: '#64748B',
+    fontSize: 12,
+    fontFamily: 'SpaceGrotesk_400Regular',
+  },
+  statusNote: {
+    color: '#0F172A',
+    fontSize: 12,
+    fontFamily: 'SpaceGrotesk_500Medium',
+  },
+  menuBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.2)',
+    justifyContent: 'flex-start',
+    paddingTop: 90,
+    paddingHorizontal: 20,
+  },
+  menuSheet: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    paddingVertical: 6,
     borderWidth: 1,
-    borderColor: '#94A3B8',
+    borderColor: 'rgba(148, 163, 184, 0.25)',
+    shadowColor: '#94A3B8',
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
   },
-  cancelText: {
-    color: '#E2E8F0',
-    fontSize: 12,
-    fontFamily: 'SpaceGrotesk_400Regular',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
-  armedNote: {
-    color: '#94A3B8',
-    textAlign: 'center',
-    marginTop: 12,
-    fontFamily: 'SpaceGrotesk_400Regular',
-  },
-  silenceStatus: {
-    marginTop: 12,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(148, 163, 184, 0.2)',
-  },
-  silenceText: {
-    color: '#CBD5F5',
-    fontSize: 12,
-    fontFamily: 'SpaceGrotesk_400Regular',
+  menuText: {
+    color: '#0F172A',
+    fontSize: 14,
+    fontFamily: 'SpaceGrotesk_500Medium',
   },
 });
