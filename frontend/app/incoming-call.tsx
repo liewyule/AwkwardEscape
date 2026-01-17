@@ -1,4 +1,3 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -49,33 +48,64 @@ export default function IncomingCallScreen() {
   };
 
   const personaName = persona?.displayName ?? 'Unknown';
-  const avatarInitial = personaName ? personaName.slice(0, 1) : '?';
 
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
-      <LinearGradient colors={['#020617', '#0F172A', '#1E293B']} style={styles.background} />
-      <View style={styles.fauxBlur} />
+      <View style={styles.background} />
+
+      <Pressable style={styles.infoButton}>
+        <Ionicons name="information-circle-outline" size={22} color="#F8FAFC" />
+      </Pressable>
 
       <View style={styles.header}>
-        <Text style={styles.incoming}>Incoming Call</Text>
-        <Text style={styles.name}>{personaName}</Text>
         <Text style={styles.subtext}>mobile</Text>
+        <Text style={styles.name}>{personaName}</Text>
       </View>
 
-      <View style={styles.avatar}>
-        <Text style={styles.avatarText}>{avatarInitial}</Text>
-      </View>
+      <View style={styles.footer}>
+        <View style={styles.actionColumns}>
+          <View style={styles.actionColumn}>
+            <View style={styles.shortcut}>
+              <View style={styles.shortcutIcon}>
+                <Ionicons name="chatbubble" size={20} color="#FFFFFF" />
+              </View>
+              <Text style={styles.shortcutLabel}>Message</Text>
+            </View>
+             <Pressable onPress={handleDecline} style={styles.actionButton}>
+              <View style={[styles.actionCircle, styles.decline]}>
+                <Ionicons
+                  name="call"
+                  size={34}
+                  color="#FFFFFF"
+                  style={{ transform: [{ rotate: "137deg" }] }}
+                />
+              </View>
+              <Text style={styles.actionLabel}>Decline</Text>
+           </Pressable>
+          </View>
 
-      <View style={styles.actions}>
-        <Pressable style={[styles.actionButton, styles.decline]} onPress={handleDecline}>
-          <Ionicons name="call" size={26} color="#fff" style={{ transform: [{ rotate: '135deg' }] }} />
-          <Text style={styles.actionLabel}>Decline</Text>
-        </Pressable>
-        <Pressable style={[styles.actionButton, styles.answer]} onPress={handleAnswer}>
-          <Ionicons name="call" size={26} color="#fff" />
-          <Text style={styles.actionLabel}>Accept</Text>
-        </Pressable>
+          <View style={styles.actionColumn}>
+            <View style={styles.shortcut}>
+              <View style={styles.shortcutIcon}>
+                <Ionicons name="alarm" size={20} color="#FFFFFF" />
+              </View>
+              <Text style={styles.shortcutLabel}>Remind Me</Text>
+            </View>
+            <Pressable onPress={handleAnswer} style={styles.actionButton}>
+              <View style={[styles.actionCircle, styles.answer]}>
+                <Ionicons
+                  name="call"
+                  size={34}
+                  color="#FFFFFF"
+                />
+              </View>
+              <Text style={styles.actionLabel}>Accept</Text>
+            </Pressable>
+          </View>
+        </View>
+
+        <View style={styles.bottomHandle} />
       </View>
     </View>
   );
@@ -85,89 +115,104 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 90,
-    paddingBottom: 70,
+    justifyContent: 'flex-start',
+    paddingTop: 72,
+    paddingBottom: 16,
+    backgroundColor: '#5A524A',
   },
   background: {
     ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#5A524A',
   },
-  fauxBlur: {
+  infoButton: {
     position: 'absolute',
-    top: 120,
-    right: -40,
-    width: 220,
-    height: 220,
-    borderRadius: 120,
-    backgroundColor: 'rgba(148, 163, 184, 0.2)',
-    shadowColor: '#94A3B8',
-    shadowOpacity: 0.4,
-    shadowRadius: 40,
+    top: 52,
+    right: 22,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   header: {
     alignItems: 'center',
-    gap: 10,
-  },
-  incoming: {
-    color: '#CBD5F5',
-    fontSize: 14,
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    fontFamily: 'SpaceGrotesk_400Regular',
+    marginTop: 56,
+    gap: 6,
   },
   name: {
-    color: '#F8FAFC',
-    fontSize: 32,
-    fontFamily: 'SpaceGrotesk_600SemiBold',
+    color: '#FFFFFF',
+    fontSize: 34,
+    fontFamily: 'System',
+    fontWeight: '600',
   },
   subtext: {
-    color: '#94A3B8',
-    fontSize: 14,
-    fontFamily: 'SpaceGrotesk_400Regular',
+    color: 'rgba(255, 255, 255, 0.9)',
+    fontSize: 18,
+    letterSpacing: 0.6,
+    fontFamily: 'System',
+    fontWeight: '700',
   },
-  avatar: {
-    width: 140,
-    height: 140,
-    borderRadius: 70,
+  footer: {
+    width: '100%',
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(148, 163, 184, 0.2)',
-    borderWidth: 2,
-    borderColor: 'rgba(248, 250, 252, 0.5)',
+    marginTop: 'auto',
+    gap: 14,
   },
-  avatarText: {
-    color: '#FDE68A',
-    fontSize: 56,
-    fontFamily: 'SpaceGrotesk_600SemiBold',
-  },
-  actions: {
+  actionColumns: {
+    width: '84%',
     flexDirection: 'row',
     justifyContent: 'space-between',
-    width: '80%',
+  },
+  actionColumn: {
+    alignItems: 'center',
+    gap: 24,
+  },
+  shortcut: {
+    alignItems: 'center',
+    gap: 10,
+  },
+  shortcutIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+  },
+  shortcutLabel: {
+    color: 'rgba(255, 255, 255, 0.9)',
+    fontSize: 17,
+    fontFamily: 'System',
+    fontWeight: '500',
   },
   actionButton: {
     alignItems: 'center',
+    gap: 10,
+  },
+  actionCircle: {
+    alignItems: 'center',
     justifyContent: 'center',
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    gap: 8,
+    width: 100,
+    height: 100,
+    borderRadius: 41,
   },
   decline: {
     backgroundColor: '#EF4444',
-    shadowColor: '#EF4444',
-    shadowOpacity: 0.5,
-    shadowRadius: 14,
   },
   answer: {
     backgroundColor: '#22C55E',
-    shadowColor: '#22C55E',
-    shadowOpacity: 0.5,
-    shadowRadius: 14,
   },
   actionLabel: {
-    color: '#fff',
-    fontSize: 12,
-    fontFamily: 'SpaceGrotesk_400Regular',
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontFamily: 'System',
+    fontWeight: '500',
+  },
+  bottomHandle: {
+    width: 120,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255, 255, 255, 0.75)',
+    marginBottom: 6,
   },
 });
