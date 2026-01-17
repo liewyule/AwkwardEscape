@@ -46,15 +46,58 @@ export function useSilenceTrigger(options: SilenceTriggerOptions) {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const silenceStartRef = useRef<number | null>(null);
   const triggeredRef = useRef(false);
+  const startingRef = useRef(false);
+  const stopPromiseRef = useRef<Promise<void> | null>(null);
   const [meterDb, setMeterDb] = useState<number | null>(null);
   const [silenceElapsedMs, setSilenceElapsedMs] = useState(0);
 
   useEffect(() => {
     let isActive = true;
 
+    const stopExisting = async () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+      intervalRef.current = null;
+      silenceStartRef.current = null;
+      triggeredRef.current = false;
+      setMeterDb(null);
+      setSilenceElapsedMs(0);
+
+      const recording = recordingRef.current;
+      recordingRef.current = null;
+      if (!recording) {
+        return;
+      }
+
+      try {
+        await recording.stopAndUnloadAsync();
+      } catch {
+        // Ignore teardown errors.
+      }
+
+      try {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+        });
+      } catch {
+        // Ignore teardown errors.
+      }
+    };
+
     const start = async () => {
+      if (startingRef.current) {
+        return;
+      }
+      startingRef.current = true;
+      if (stopPromiseRef.current) {
+        await stopPromiseRef.current;
+      }
+      await stopExisting();
+
       const permission = await Audio.requestPermissionsAsync();
       if (!permission.granted || !isActive) {
+        startingRef.current = false;
         return;
       }
 
@@ -91,6 +134,7 @@ export function useSilenceTrigger(options: SilenceTriggerOptions) {
             Date.now() - silenceStartRef.current >= silenceMs
           ) {
             triggeredRef.current = true;
+            stopPromiseRef.current = stopExisting();
             onSilence();
           }
         } else {
@@ -98,30 +142,14 @@ export function useSilenceTrigger(options: SilenceTriggerOptions) {
           setSilenceElapsedMs(0);
         }
       }, sampleEveryMs);
+      startingRef.current = false;
     };
 
     start();
 
     return () => {
       isActive = false;
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-      intervalRef.current = null;
-      silenceStartRef.current = null;
-      triggeredRef.current = false;
-      setMeterDb(null);
-      setSilenceElapsedMs(0);
-
-      const recording = recordingRef.current;
-      recordingRef.current = null;
-      if (recording) {
-        recording
-          .stopAndUnloadAsync()
-          .catch(() => {
-            // Ignore teardown errors.
-          });
-      }
+      stopPromiseRef.current = stopExisting();
     };
   }, [onSilence, sampleEveryMs, silenceDbThreshold, silenceMs]);
 
