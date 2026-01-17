@@ -5,10 +5,12 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { PERSONAS } from '@/constants/personas';
+import { VOICES } from '@/constants/voices';
 import { useCallStore } from '@/features/callLogic';
 import { playScript, stopTTS } from '@/services/ttsEngine';
 import { useSettingsStore } from '@/store/settingsStore';
 import { Teleprompter } from '@/components/call/Teleprompter';
+import { Keypad } from '@/components/call/Keypad';
 
 const formatElapsed = (startAt: number | null) => {
   if (!startAt) return '00:00';
@@ -20,10 +22,23 @@ const formatElapsed = (startAt: number | null) => {
 
 export default function ActiveCallScreen() {
   const router = useRouter();
-  const { status, scriptTurns, activeLineIndex, setActiveLineIndex, callStartedAt, endCall, micLevel } =
-    useCallStore();
-  const { personaId } = useSettingsStore();
+  const {
+    status,
+    scriptTurns,
+    activeLineIndex,
+    setActiveLineIndex,
+    callStartedAt,
+    endCall,
+    micLevel,
+    isMuted,
+    isSpeakerOn,
+    toggleMute,
+    toggleSpeaker,
+  } = useCallStore();
+  const { personaId, voiceId } = useSettingsStore();
   const [elapsed, setElapsed] = useState('00:00');
+  const [keypadOpen, setKeypadOpen] = useState(false);
+  const [dialed, setDialed] = useState('');
 
   const persona = useMemo(
     () => PERSONAS.find((item) => item.id === personaId) ?? PERSONAS[0],
@@ -45,12 +60,13 @@ export default function ActiveCallScreen() {
       return;
     }
 
-    playScript(scriptTurns, setActiveLineIndex);
+    const voice = VOICES.find((item) => item.id === voiceId);
+    playScript(scriptTurns, setActiveLineIndex, voice);
 
     return () => {
       stopTTS();
     };
-  }, [status, scriptTurns, setActiveLineIndex, router]);
+  }, [status, scriptTurns, setActiveLineIndex, router, voiceId]);
 
   const handleEnd = async () => {
     stopTTS();
@@ -81,25 +97,40 @@ export default function ActiveCallScreen() {
       <Teleprompter turns={scriptTurns} activeIndex={activeLineIndex} />
 
       <View style={styles.controls}>
+        {dialed.length > 0 && (
+          <Text style={styles.dialedText}>{dialed}</Text>
+        )}
         <View style={styles.controlRow}>
-          <View style={styles.controlButton}>
-            <Ionicons name="mic-off" size={22} color="#CBD5F5" />
-            <Text style={styles.controlLabel}>Mute</Text>
-          </View>
-          <View style={styles.controlButton}>
+          <Pressable
+            style={[styles.controlButton, isMuted && styles.controlButtonActive]}
+            onPress={toggleMute}>
+            <Ionicons name={isMuted ? 'mic-off' : 'mic'} size={22} color="#CBD5F5" />
+            <Text style={styles.controlLabel}>{isMuted ? 'Muted' : 'Mute'}</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.controlButton, keypadOpen && styles.controlButtonActive]}
+            onPress={() => setKeypadOpen((prev) => !prev)}>
             <Ionicons name="keypad" size={22} color="#CBD5F5" />
             <Text style={styles.controlLabel}>Keypad</Text>
-          </View>
-          <View style={styles.controlButton}>
-            <Ionicons name="volume-high" size={22} color="#CBD5F5" />
-            <Text style={styles.controlLabel}>Speaker</Text>
-          </View>
+          </Pressable>
+          <Pressable
+            style={[styles.controlButton, isSpeakerOn && styles.controlButtonActive]}
+            onPress={toggleSpeaker}>
+            <Ionicons name={isSpeakerOn ? 'volume-high' : 'volume-low'} size={22} color="#CBD5F5" />
+            <Text style={styles.controlLabel}>{isSpeakerOn ? 'Speaker' : 'Earpiece'}</Text>
+          </Pressable>
         </View>
         <Pressable style={styles.endButton} onPress={handleEnd}>
           <Ionicons name="call" size={24} color="#fff" style={{ transform: [{ rotate: '135deg' }] }} />
           <Text style={styles.endLabel}>End</Text>
         </Pressable>
       </View>
+      {keypadOpen && (
+        <Keypad
+          onKeyPress={(value) => setDialed((prev) => `${prev}${value}`)}
+          onClose={() => setKeypadOpen(false)}
+        />
+      )}
     </View>
   );
 }
@@ -144,6 +175,12 @@ const styles = StyleSheet.create({
     gap: 24,
     alignItems: 'center',
   },
+  dialedText: {
+    color: '#F8FAFC',
+    fontSize: 16,
+    fontFamily: 'SpaceGrotesk_500Medium',
+    letterSpacing: 2,
+  },
   controlRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -155,6 +192,12 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     backgroundColor: 'rgba(15, 23, 42, 0.8)',
     width: '30%',
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  controlButtonActive: {
+    borderColor: 'rgba(253, 224, 71, 0.6)',
+    backgroundColor: 'rgba(249, 115, 22, 0.18)',
   },
   controlLabel: {
     color: '#CBD5F5',

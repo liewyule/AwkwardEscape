@@ -1,13 +1,8 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Pressable,
-  StyleSheet,
-  Switch,
-  Text,
-  View,
-} from 'react-native';
+import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 import { PERSONAS } from '@/constants/personas';
 import { useCallStore } from '@/features/callLogic';
@@ -23,6 +18,7 @@ export default function HomeScreen() {
   const [countdown, setCountdownState] = useState(0);
   const [messageQueued, setMessageQueued] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const countdownRef = useRef(0);
 
   const selectedPersona = useMemo(
     () => PERSONAS.find((item) => item.id === personaId) ?? PERSONAS[0],
@@ -44,36 +40,35 @@ export default function HomeScreen() {
 
     setCountdownState(COUNTDOWN_SECONDS);
     setCountdown(COUNTDOWN_SECONDS);
+    countdownRef.current = COUNTDOWN_SECONDS;
 
     timerRef.current = setInterval(async () => {
-      setCountdownState((prev) => {
-        const next = prev - 1;
-        setCountdown(next);
+      countdownRef.current -= 1;
+      const next = countdownRef.current;
+      setCountdownState(next);
+      setCountdown(next);
 
-        if (next <= 0) {
-          if (timerRef.current) {
-            clearInterval(timerRef.current);
-          }
-          timerRef.current = null;
+      if (next <= 0) {
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+        }
+        timerRef.current = null;
+        countdownRef.current = 0;
 
-          if (mode === 'message') {
-            scheduleFakeMessage(
-              selectedPersona.name,
-              'Urgent: can you step out for a minute? I need to talk.'
-            );
-            setMessageQueued(true);
-            setTimeout(() => setMessageQueued(false), 2000);
-            return 0;
-          }
-
-          startRinging(selectedPersona.id).then(() => {
-            router.push('/incoming-call');
-          });
-          return 0;
+        if (mode === 'message') {
+          scheduleFakeMessage(
+            selectedPersona.name,
+            'Urgent: can you step out for a minute? I need to talk.'
+          );
+          setMessageQueued(true);
+          setTimeout(() => setMessageQueued(false), 2000);
+          return;
         }
 
-        return next;
-      });
+        startRinging(selectedPersona.id).then(() => {
+          router.push('/incoming-call');
+        });
+      }
     }, 1000);
   };
 
@@ -84,6 +79,7 @@ export default function HomeScreen() {
     timerRef.current = null;
     setCountdownState(0);
     setCountdown(0);
+    countdownRef.current = 0;
   };
 
   return (
@@ -94,8 +90,13 @@ export default function HomeScreen() {
       />
       <View style={styles.glow} />
       <View style={styles.header}>
-        <Text style={styles.title}>AwkwardEscape</Text>
-        <Text style={styles.subtitle}>Social Emergency Exit</Text>
+        <View>
+          <Text style={styles.title}>AwkwardEscape</Text>
+          <Text style={styles.subtitle}>Social Emergency Exit</Text>
+        </View>
+        <Pressable onPress={() => router.push('/settings')} style={styles.settingsButton}>
+          <Ionicons name="settings-outline" size={22} color="#E2E8F0" />
+        </Pressable>
       </View>
 
       <View style={styles.panel}>
@@ -184,6 +185,9 @@ const styles = StyleSheet.create({
   },
   header: {
     marginBottom: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   title: {
     color: '#F8FAFC',
@@ -198,6 +202,16 @@ const styles = StyleSheet.create({
     fontFamily: 'SpaceGrotesk_400Regular',
     textTransform: 'uppercase',
     letterSpacing: 1.4,
+  },
+  settingsButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.3)',
   },
   panel: {
     backgroundColor: 'rgba(15, 23, 42, 0.7)',

@@ -19,6 +19,8 @@ type CallState = {
   activeLineIndex: number;
   callStartedAt: number | null;
   micLevel: number;
+  isMuted: boolean;
+  isSpeakerOn: boolean;
   setCountdown: (value: number) => void;
   setActiveLineIndex: (index: number) => void;
   startRinging: (personaId: string) => Promise<void>;
@@ -26,6 +28,8 @@ type CallState = {
   endCall: () => Promise<void>;
   resetCall: () => void;
   setMicLevel: (level: number) => void;
+  toggleMute: () => Promise<void>;
+  toggleSpeaker: () => Promise<void>;
 };
 
 const stopRingtone = async () => {
@@ -51,6 +55,8 @@ export const useCallStore = create<CallState>((set, get) => ({
   activeLineIndex: 0,
   callStartedAt: null,
   micLevel: -80,
+  isMuted: false,
+  isSpeakerOn: true,
   setCountdown: (value) => set({ countdown: value }),
   setActiveLineIndex: (index) => set({ activeLineIndex: index }),
   setMicLevel: (level) => set({ micLevel: level }),
@@ -63,6 +69,8 @@ export const useCallStore = create<CallState>((set, get) => ({
       activeLineIndex: 0,
       callStartedAt: null,
       micLevel: -80,
+      isMuted: false,
+      isSpeakerOn: true,
     }),
   startRinging: async (personaId) => {
     const persona = PERSONAS.find((item) => item.id === personaId) ?? PERSONAS[0];
@@ -113,6 +121,8 @@ export const useCallStore = create<CallState>((set, get) => ({
       scriptTurns,
       teleprompterText,
       callStartedAt: Date.now(),
+      isMuted: false,
+      isSpeakerOn: true,
     });
   },
   endCall: async () => {
@@ -122,7 +132,28 @@ export const useCallStore = create<CallState>((set, get) => ({
     set({
       status: 'ended',
       callStartedAt: null,
+      isMuted: false,
+      isSpeakerOn: true,
     });
+  },
+  toggleMute: async () => {
+    const next = !get().isMuted;
+    if (next) {
+      await stopMicMetering();
+      set({ isMuted: true, micLevel: -80 });
+      return;
+    }
+    await startMicMetering((level) => get().setMicLevel(level));
+    set({ isMuted: false });
+  },
+  toggleSpeaker: async () => {
+    const next = !get().isSpeakerOn;
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: true,
+      playsInSilentModeIOS: true,
+      playThroughEarpieceAndroid: !next,
+    });
+    set({ isSpeakerOn: next });
   },
 }));
 

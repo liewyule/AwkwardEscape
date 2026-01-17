@@ -36,6 +36,7 @@ Create a `.env` file at `frontend/.env`:
 
 ```bash
 EXPO_PUBLIC_GROQ_API_KEY=your_groq_key
+EXPO_PUBLIC_GCP_TTS_API_KEY=your_google_cloud_tts_key
 EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 EXPO_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
 ```
