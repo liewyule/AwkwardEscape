@@ -181,7 +181,7 @@ const styles = StyleSheet.create({
   },
   shortcutLabel: {
     color: 'rgba(255, 255, 255, 0.9)',
-    fontSize: 17,
+    fontSize: 15,
     fontFamily: 'System',
     fontWeight: '500',
   },
@@ -192,8 +192,8 @@ const styles = StyleSheet.create({
   actionCircle: {
     alignItems: 'center',
     justifyContent: 'center',
-    width: 100,
-    height: 100,
+    width: 84,
+    height: 84,
     borderRadius: 41,
   },
   decline: {
@@ -204,7 +204,7 @@ const styles = StyleSheet.create({
   },
   actionLabel: {
     color: '#FFFFFF',
-    fontSize: 17,
+    fontSize: 15,
     fontFamily: 'System',
     fontWeight: '500',
   },
