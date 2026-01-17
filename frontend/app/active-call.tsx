@@ -1,123 +1,322 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Animated,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+
 import { Ionicons } from '@expo/vector-icons';
-import { StatusBar } from 'expo-status-bar';
 
+import type { CallMode } from '@/types/call';
 import { useCallStore } from '@/features/callLogic';
-import { playScript, stopTTS } from '@/services/ttsEngine';
+import { scheduleFakeMessage } from '@/services/notificationEngine';
+import { detectVoiceActivity } from '@/services/micMetering';
+import { generateMessageText } from '@/services/scriptEngine';
 import { useSettingsStore } from '@/store/settingsStore';
-import { Teleprompter } from '@/components/call/Teleprompter';
+import { useSilenceTrigger } from '@/components/useSilenceTrigger';
 
-const formatElapsed = (startAt: number | null) => {
-  if (!startAt) return '00:00';
-  const total = Math.floor((Date.now() - startAt) / 1000);
-  const minutes = Math.floor(total / 60);
-  const seconds = total % 60;
-  return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+const HOLD_DURATION_MS = 2000;
+
+const MODE_LABELS: Record<CallMode, string> = {
+  silent_message: 'Silent message',
+  instant_call: 'Instant call',
+  voice_guard: 'Voice guard',
 };
 
-export default function ActiveCallScreen() {
-  const router = useRouter();
-  const {
-    status,
-    scriptTurns,
-    activeLineIndex,
-    setActiveLineIndex,
-    callStartedAt,
-    endCall,
-    micLevel,
-    activePersona,
-  } = useCallStore();
-  const { personas, selectedPersonaId } = useSettingsStore();
-  const [elapsed, setElapsed] = useState('00:00');
+function SilenceTriggerListener({ onSilence }: { onSilence: () => void }) {
+  const { meterDb, silenceElapsedMs, silenceMs, silenceDbThreshold } = useSilenceTrigger({
+    onSilence,
+    silenceMs: 5000,
+  });
 
-  const fallbackPersona = useMemo(
-    () => personas.find((item) => item.id === selectedPersonaId) ?? personas[0],
-    [personas, selectedPersonaId]
+  const elapsedSeconds = (silenceElapsedMs / 1000).toFixed(1);
+  const targetSeconds = (silenceMs / 1000).toFixed(1);
+  const meterLabel = meterDb === null ? '—' : `${meterDb.toFixed(0)} dB`;
+
+  return (
+    <View style={styles.silenceStatus}>
+      <Text style={styles.silenceText}>
+        Silence: {elapsedSeconds}s / {targetSeconds}s
+      </Text>
+      <Text style={styles.silenceText}>
+        Level: {meterLabel} (trigger below {silenceDbThreshold} dB)
+      </Text>
+    </View>
   );
-  const persona = activePersona ?? fallbackPersona;
+}
+
+export default function HomeScreen() {
+  const router = useRouter();
+
+  const { startRinging } = useCallStore();
+  const { personas, selectedPersonaId, selectedMode } = useSettingsStore();
+
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [statusNote, setStatusNote] = useState<string | null>(null);
+
+  const [isHolding, setIsHolding] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+
+
+  const [silenceEnabled, setSilenceEnabled] = useState(false);
+
+  const progress = useRef(new Animated.Value(0)).current;
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdCompletedRef = useRef(false);
+  const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+
+  const selectedPersona = useMemo(() => {
+    const found = personas.find((p) => p.id === selectedPersonaId);
+    return found ?? personas[0] ?? null;
+  }, [personas, selectedPersonaId]);
+
+  const setStatus = useCallback((message: string | null, durationMs = 2200) => {
+    if (statusTimerRef.current) {
+      clearTimeout(statusTimerRef.current);
+    }
+    setStatusNote(message);
+    if (message && durationMs > 0) {
+      statusTimerRef.current = setTimeout(() => setStatusNote(null), durationMs);
+    }
+  }, []);
 
   useEffect(() => {
-    const timer = setInterval(() => setElapsed(formatElapsed(callStartedAt)), 1000);
-    return () => clearInterval(timer);
-  }, [callStartedAt]);
-
-  useEffect(() => {
-    if (status !== 'answered') {
-      router.replace('/(tabs)');
-      return;
-    }
-
-    if (scriptTurns.length === 0) {
-      return;
-    }
-
-    playScript(scriptTurns, setActiveLineIndex);
-
     return () => {
-      stopTTS();
+      if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+      if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
     };
-  }, [status, scriptTurns, setActiveLineIndex, router]);
+  }, []);
 
-  useEffect(() => {
-    return () => {
-      if (status === 'answered') {
-        void endCall();
+  const resetProgress = useCallback(() => {
+    Animated.timing(progress, {
+      toValue: 0,
+      duration: 180,
+      useNativeDriver: false,
+    }).start();
+  }, [progress]);
+
+  const handleSilenceTrigger = useCallback(() => {
+    if (!selectedPersona) return;
+
+    // If your startRinging expects a persona object, change to: startRinging(selectedPersona)
+    startRinging(selectedPersona.id).then(() => {
+      router.push('/call/incoming');
+    });
+  }, [router, selectedPersona, startRinging]);
+
+  const triggerEscape = useCallback(async () => {
+    if (!selectedPersona) {
+      setStatus('Add a persona to continue.');
+      resetProgress();
+      return;
+    }
+
+    setIsProcessing(true);
+
+    try {
+      if (selectedMode === 'silent_message') {
+        const message = await generateMessageText(selectedPersona);
+        await scheduleFakeMessage(selectedPersona.displayName, message);
+        setStatus('Silent message scheduled.');
+        return;
       }
-    };
-  }, [status, endCall]);
 
-  const handleEnd = async () => {
-    stopTTS();
-    await endCall();
-    router.replace('/(tabs)');
-  };
+      if (selectedMode === 'instant_call') {
+        // If your startRinging expects persona object: await startRinging(selectedPersona)
+        await startRinging(selectedPersona.id);
+        router.push('/call/incoming');
+        return;
+      }
+
+      // voice_guard
+      setStatus('Listening for voice for 7 seconds...', 0);
+      const result = await detectVoiceActivity({
+        timeoutMs: 7000,
+        thresholdDb: -40,
+        framesRequired: 4,
+      });
+
+      if (!result.permissionGranted) {
+        setStatus('Mic permission is required for voice detection.');
+        return;
+      }
+
+      if (result.voiceDetected) {
+        setStatus('Voice detected. Call not started.');
+        return;
+      }
+
+      setStatus('No voice detected. Starting call...');
+      await startRinging(selectedPersona.id);
+      router.push('/call/incoming');
+    } finally {
+      setIsProcessing(false);
+      resetProgress();
+    }
+  }, [resetProgress, router, selectedMode, selectedPersona, setStatus, startRinging]);
+
+  const beginHold = useCallback(() => {
+    if (isProcessing || isHolding) return;
+
+    holdCompletedRef.current = false;
+    setIsHolding(true);
+
+    Animated.timing(progress, {
+      toValue: 1,
+      duration: HOLD_DURATION_MS,
+      useNativeDriver: false,
+    }).start();
+
+    holdTimerRef.current = setTimeout(() => {
+      holdCompletedRef.current = true;
+      setIsHolding(false);
+      holdTimerRef.current = null;
+      void triggerEscape();
+    }, HOLD_DURATION_MS);
+  }, [isHolding, isProcessing, progress, triggerEscape]);
+
+  const cancelHold = useCallback(() => {
+    if (holdCompletedRef.current) return;
+
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+
+    setIsHolding(false);
+    resetProgress();
+  }, [resetProgress]);
+
+  const progressWidth = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 200],
+  });
 
   return (
     <View style={styles.container}>
-      <StatusBar style="light" />
-      <LinearGradient colors={['#040509', '#0B1320', '#1E293B']} style={styles.background} />
+      <LinearGradient
+        colors={['#0B0F1A', '#111927', '#1B2735']}
+        style={StyleSheet.absoluteFillObject}
+      />
+      <View style={styles.glow} pointerEvents="none" />
 
       <View style={styles.header}>
-        <Text style={styles.name}>{persona.displayName}</Text>
-        <Text style={styles.timer}>{elapsed}</Text>
-        <View style={styles.micMeter}
+        <View>
+          <Text style={styles.title}>AwkwardEscape</Text>
+          <Text style={styles.subtitle}>Social Emergency Exit</Text>
+        </View>
+
+        <View style={styles.headerActions}>
+          <Pressable onPress={() => router.push('/(tabs)/settings')} style={styles.settingsButton}>
+            <Ionicons name="settings-outline" size={22} color="#E2E8F0" />
+          </Pressable>
+
+          <Pressable style={styles.menuButton} onPress={() => setMenuVisible(true)}>
+            <Ionicons name="ellipsis-horizontal" size={22} color="#E2E8F0" />
+          </Pressable>
+        </View>
+      </View>
+
+      <View style={styles.panel}>
+        <Text style={styles.panelLabel}>Silence Trigger</Text>
+        <Text style={styles.panelHint}>
+          Toggle standby. When enabled, silence for 5s triggers your selected mode.
+        </Text>
+
+        <View style={styles.toggleRow}>
+          <Text style={styles.toggleText}>{silenceEnabled ? 'Standby on' : 'Standby off'}</Text>
+          <Pressable
+            onPress={() => setSilenceEnabled((v) => !v)}
+            style={[styles.pill, silenceEnabled && styles.pillOn]}
           >
-          <View
+            <Text style={styles.pillText}>{silenceEnabled ? 'ON' : 'OFF'}</Text>
+          </Pressable>
+        </View>
+
+        {silenceEnabled && <SilenceTriggerListener onSilence={handleSilenceTrigger} />}
+      </View>
+
+      <View style={styles.centerContent}>
+        <Pressable
+          onPressIn={beginHold}
+          onPressOut={cancelHold}
+          disabled={isProcessing}
+          style={({ pressed }) => [
+            styles.panicButton,
+            pressed && !isProcessing && { transform: [{ scale: 0.98 }] },
+            isProcessing && { opacity: 0.8 },
+          ]}
+        >
+          <Animated.View
             style={[
-              styles.micFill,
+              styles.panicFill,
               {
-                width: `${Math.min(100, Math.max(10, (micLevel + 80) * 1.2))}%`,
+                height: progress.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0, 220],
+                }),
               },
             ]}
           />
-        </View>
-      </View>
-
-      <Teleprompter turns={scriptTurns} activeIndex={activeLineIndex} />
-
-      <View style={styles.controls}>
-        <View style={styles.controlRow}>
-          <View style={styles.controlButton}>
-            <Ionicons name="mic-off" size={22} color="#CBD5F5" />
-            <Text style={styles.controlLabel}>Mute</Text>
-          </View>
-          <View style={styles.controlButton}>
-            <Ionicons name="keypad" size={22} color="#CBD5F5" />
-            <Text style={styles.controlLabel}>Keypad</Text>
-          </View>
-          <View style={styles.controlButton}>
-            <Ionicons name="volume-high" size={22} color="#CBD5F5" />
-            <Text style={styles.controlLabel}>Speaker</Text>
-          </View>
-        </View>
-        <Pressable style={styles.endButton} onPress={handleEnd}>
-          <Ionicons name="call" size={24} color="#fff" style={{ transform: [{ rotate: '135deg' }] }} />
-          <Text style={styles.endLabel}>End</Text>
+          <Text style={styles.panicText}>{isProcessing ? 'Processing…' : 'Hold to Escape'}</Text>
+          <Text style={styles.panicHint}>{isHolding ? 'Keep holding…' : 'Hold for 2 seconds'}</Text>
         </Pressable>
+
+        <View style={styles.progressTrack}>
+          <Animated.View style={[styles.progressFill, { width: progressWidth }]} />
+        </View>
+
+        {!!selectedPersona && (
+          <Text style={styles.activeMeta}>
+            Active: {selectedPersona.displayName} • {MODE_LABELS[selectedMode]}
+          </Text>
+        )}
+
+        {!selectedPersona && (
+          <Text style={styles.activeMeta}>No personas yet — add one in Personas.</Text>
+        )}
+
+        {statusNote && <Text style={styles.statusNote}>{statusNote}</Text>}
       </View>
+
+      <Modal
+        visible={menuVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMenuVisible(false)}
+      >
+        <Pressable style={styles.menuBackdrop} onPress={() => setMenuVisible(false)}>
+          <Pressable style={styles.menuSheet} onPress={() => {}}>
+            <Pressable
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuVisible(false);
+                router.push('/persona');
+              }}
+            >
+              <Text style={styles.menuText}>Personas</Text>
+              <Ionicons name="chevron-forward" size={18} color="#E2E8F0" />
+            </Pressable>
+
+            <Pressable
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuVisible(false);
+                router.push('/mode');
+              }}
+            >
+              <Text style={styles.menuText}>Modes</Text>
+              <Ionicons name="chevron-forward" size={18} color="#E2E8F0" />
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -125,78 +324,220 @@ export default function ActiveCallScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingTop: 80,
-    paddingHorizontal: 22,
-    paddingBottom: 50,
-    justifyContent: 'space-between',
+    paddingTop: 68,
+    paddingHorizontal: 24,
   },
-  background: {
-    ...StyleSheet.absoluteFillObject,
+
+  glow: {
+    position: 'absolute',
+    top: 90,
+    left: -120,
+    width: 260,
+    height: 260,
+    borderRadius: 180,
+    backgroundColor: 'rgba(249, 115, 22, 0.12)',
+    transform: [{ rotate: '12deg' }],
   },
+
   header: {
-    alignItems: 'center',
-    gap: 10,
-  },
-  name: {
-    color: '#F8FAFC',
-    fontSize: 26,
-    fontFamily: 'SpaceGrotesk_600SemiBold',
-  },
-  timer: {
-    color: '#94A3B8',
-    fontSize: 14,
-    fontFamily: 'SpaceGrotesk_400Regular',
-  },
-  micMeter: {
-    width: '70%',
-    height: 6,
-    borderRadius: 999,
-    backgroundColor: 'rgba(148, 163, 184, 0.2)',
-    overflow: 'hidden',
-  },
-  micFill: {
-    height: '100%',
-    backgroundColor: '#F97316',
-  },
-  controls: {
-    gap: 24,
-    alignItems: 'center',
-  },
-  controlRow: {
+    marginBottom: 18,
     flexDirection: 'row',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
-    width: '100%',
   },
-  controlButton: {
+  headerActions: {
+    flexDirection: 'row',
+    gap: 10,
     alignItems: 'center',
-    padding: 12,
-    borderRadius: 18,
-    backgroundColor: 'rgba(15, 23, 42, 0.8)',
-    width: '30%',
   },
-  controlLabel: {
+
+  title: {
+    color: '#E2E8F0',
+    fontSize: 30,
+    fontFamily: 'SpaceGrotesk_600SemiBold',
+    letterSpacing: 0.4,
+  },
+  subtitle: {
+    color: '#94A3B8',
+    marginTop: 6,
+    fontSize: 12,
+    fontFamily: 'SpaceGrotesk_400Regular',
+    textTransform: 'uppercase',
+    letterSpacing: 1.4,
+  },
+
+  settingsButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.25)',
+  },
+  menuButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.25)',
+  },
+
+  panel: {
+    backgroundColor: 'rgba(15, 23, 42, 0.7)',
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.2)',
+  },
+  panelLabel: {
+    color: '#E2E8F0',
+    fontSize: 12,
+    fontFamily: 'SpaceGrotesk_600SemiBold',
+    textTransform: 'uppercase',
+    letterSpacing: 1.2,
+    marginBottom: 8,
+  },
+  panelHint: {
+    color: '#94A3B8',
+    fontSize: 12,
+    fontFamily: 'SpaceGrotesk_400Regular',
+    marginBottom: 10,
+  },
+
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  toggleText: {
     color: '#CBD5F5',
     fontSize: 12,
-    marginTop: 6,
     fontFamily: 'SpaceGrotesk_400Regular',
   },
-  endButton: {
+  pill: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: 'rgba(148, 163, 184, 0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.25)',
+  },
+  pillOn: {
+    backgroundColor: 'rgba(34, 197, 94, 0.22)',
+    borderColor: 'rgba(34, 197, 94, 0.35)',
+  },
+  pillText: {
+    color: '#E2E8F0',
+    fontSize: 12,
+    fontFamily: 'SpaceGrotesk_600SemiBold',
+    letterSpacing: 0.6,
+  },
+
+  centerContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 18,
+  },
+  panicButton: {
+    width: 220,
+    height: 220,
+    borderRadius: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(226, 232, 240, 0.18)',
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 18,
+    overflow: 'hidden',
+  },
+  panicFill: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(249, 115, 22, 0.22)',
+  },
+  panicText: {
+    color: '#E2E8F0',
+    fontSize: 20,
+    fontFamily: 'SpaceGrotesk_600SemiBold',
+  },
+  panicHint: {
+    marginTop: 8,
+    color: '#94A3B8',
+    fontSize: 12,
+    fontFamily: 'SpaceGrotesk_400Regular',
+  },
+
+  progressTrack: {
+    width: 200,
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(148, 163, 184, 0.25)',
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: 'rgba(249, 115, 22, 0.85)',
+  },
+
+  activeMeta: {
+    color: '#94A3B8',
+    fontSize: 12,
+    fontFamily: 'SpaceGrotesk_400Regular',
+  },
+  statusNote: {
+    color: '#E2E8F0',
+    fontSize: 12,
+    fontFamily: 'SpaceGrotesk_500Medium',
+  },
+
+  menuBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(2, 6, 23, 0.65)',
+    justifyContent: 'flex-start',
+    paddingTop: 90,
+    paddingHorizontal: 20,
+  },
+  menuSheet: {
+    backgroundColor: 'rgba(15, 23, 42, 0.92)',
+    borderRadius: 18,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.25)',
+  },
+  menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 28,
-    paddingVertical: 16,
-    borderRadius: 999,
-    backgroundColor: '#EF4444',
-    shadowColor: '#EF4444',
-    shadowOpacity: 0.5,
-    shadowRadius: 12,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
-  endLabel: {
-    color: '#fff',
+  menuText: {
+    color: '#E2E8F0',
     fontSize: 14,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    fontFamily: 'SpaceGrotesk_600SemiBold',
+    fontFamily: 'SpaceGrotesk_500Medium',
+  },
+
+  silenceStatus: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(148, 163, 184, 0.18)',
+  },
+  silenceText: {
+    color: '#CBD5F5',
+    fontSize: 12,
+    fontFamily: 'SpaceGrotesk_400Regular',
   },
 });

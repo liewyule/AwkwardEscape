@@ -6,13 +6,19 @@ import { DEFAULT_PERSONAS, type PersonaProfile } from '@/constants/personas';
 import type { CallMode } from '@/types/call';
 
 type SettingsState = {
+  
   personas: PersonaProfile[];
   selectedMode: CallMode;
   selectedPersonaId: string;
+
+
+  voiceId: string;
+
   addPersona: (persona: Omit<PersonaProfile, 'id'>) => void;
   deletePersona: (personaId: string) => void;
   selectPersona: (personaId: string) => void;
   setMode: (mode: CallMode) => void;
+  setVoiceId: (voiceId: string) => void;
 };
 
 const createPersonaId = () =>
@@ -51,6 +57,10 @@ export const useSettingsStore = create<SettingsState>()(
       personas: DEFAULT_PERSONAS,
       selectedMode: 'instant_call',
       selectedPersonaId: DEFAULT_PERSONAS[0].id,
+
+      // keep main’s voice setting
+      voiceId: 'en-US-Standard-B',
+
       addPersona: (persona) =>
         set((state) => {
           const nextPersona: PersonaProfile = {
@@ -60,47 +70,61 @@ export const useSettingsStore = create<SettingsState>()(
             defaultTheme: persona.defaultTheme?.trim() || undefined,
           };
           const personas = [nextPersona, ...state.personas];
-          return {
-            personas,
-            selectedPersonaId: nextPersona.id,
-          };
+          return { personas, selectedPersonaId: nextPersona.id };
         }),
+
       deletePersona: (personaId) =>
         set((state) => {
-          if (state.personas.length <= 1) {
-            return {};
-          }
-          const personas = state.personas.filter((persona) => persona.id !== personaId);
+          if (state.personas.length <= 1) return {};
+
+          const personas = state.personas.filter((p) => p.id !== personaId);
           const selectedPersonaId =
             state.selectedPersonaId === personaId
               ? personas[0]?.id ?? state.selectedPersonaId
               : state.selectedPersonaId;
+
           return { personas, selectedPersonaId };
         }),
+
       selectPersona: (personaId) => set({ selectedPersonaId: personaId }),
       setMode: (mode) => set({ selectedMode: mode }),
+      setVoiceId: (voiceId) => set({ voiceId }),
     }),
     {
       name: 'awkwardescape-settings',
       storage: createJSONStorage(() => AsyncStorage),
+
       onRehydrateStorage: () => (state) => {
-        if (!state) {
-          return;
-        }
-        const legacyMode = (state as { mode?: string }).mode;
+        if (!state) return;
+
+        // ---- Legacy migrations from the "main" branch ----
+        // legacy: mode = 'message' | 'call'
+        const legacyMode = (state as unknown as { mode?: string }).mode;
         if (!state.selectedMode && legacyMode) {
           state.selectedMode = legacyMode === 'message' ? 'silent_message' : 'instant_call';
         }
 
-        const legacyPersonaId = (state as { personaId?: string }).personaId;
+        // legacy: personaId (string key) -> selectedPersonaId (real uuid-like id)
+        const legacyPersonaId = (state as unknown as { personaId?: string }).personaId;
         if (!state.selectedPersonaId && legacyPersonaId) {
           state.selectedPersonaId =
             LEGACY_PERSONA_ID_MAP[legacyPersonaId] ?? DEFAULT_PERSONAS[0].id;
         }
+
+        // optional: legacy voiceId (keep if it existed)
+        const legacyVoiceId = (state as unknown as { voiceId?: string }).voiceId;
+        if (!state.voiceId && legacyVoiceId) {
+          state.voiceId = legacyVoiceId;
+        }
+
+        // normalize personas + selection
         const personas = Array.isArray(state.personas) ? state.personas : DEFAULT_PERSONAS;
         const normalized = normalizeSelection(personas, state.selectedPersonaId);
         state.personas = normalized.personas;
         state.selectedPersonaId = normalized.selectedPersonaId;
+
+        // (optional) cleanup: you can delete old keys from the persisted object
+        // but zustand persist doesn’t guarantee mutation persists back immediately.
       },
     }
   )

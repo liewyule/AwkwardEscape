@@ -19,14 +19,22 @@ type CallState = {
   activeLineIndex: number;
   callStartedAt: number | null;
   micLevel: number;
+
   activePersona: PersonaProfile | null;
+  isMuted: boolean;
+  isSpeakerOn: boolean;
+
   setCountdown: (value: number) => void;
   setActiveLineIndex: (index: number) => void;
+
   startRinging: (persona: PersonaProfile) => Promise<void>;
   answerCall: (persona?: PersonaProfile) => Promise<void>;
   endCall: () => Promise<void>;
   resetCall: () => void;
+
   setMicLevel: (level: number) => void;
+  toggleMute: () => Promise<void>;
+  toggleSpeaker: () => Promise<void>;
 };
 
 const stopRingtone = async () => {
@@ -37,7 +45,7 @@ const stopRingtone = async () => {
       await ringtoneSound.stopAsync();
       await ringtoneSound.unloadAsync();
     } catch {
-      // Ignore ringtone teardown errors
+      // ignore
     } finally {
       ringtoneSound = null;
     }
@@ -52,10 +60,15 @@ export const useCallStore = create<CallState>((set, get) => ({
   activeLineIndex: 0,
   callStartedAt: null,
   micLevel: -80,
+
   activePersona: null,
+  isMuted: false,
+  isSpeakerOn: true,
+
   setCountdown: (value) => set({ countdown: value }),
   setActiveLineIndex: (index) => set({ activeLineIndex: index }),
   setMicLevel: (level) => set({ micLevel: level }),
+
   resetCall: () =>
     set({
       status: 'idle',
@@ -66,11 +79,16 @@ export const useCallStore = create<CallState>((set, get) => ({
       callStartedAt: null,
       micLevel: -80,
       activePersona: null,
+      isMuted: false,
+      isSpeakerOn: true,
     }),
+
   startRinging: async (persona) => {
+    // ensure ringtone can play even if device is silent (iOS)
     await Audio.setAudioModeAsync({
       playsInSilentModeIOS: true,
       allowsRecordingIOS: false,
+      playThroughEarpieceAndroid: false,
     });
 
     const { sound } = await Audio.Sound.createAsync(ringtoneAsset, {
@@ -80,7 +98,6 @@ export const useCallStore = create<CallState>((set, get) => ({
     });
 
     ringtoneSound = sound;
-
     Vibration.vibrate([0, 800, 600], true);
 
     set({
@@ -90,20 +107,23 @@ export const useCallStore = create<CallState>((set, get) => ({
       scriptTurns: [],
       teleprompterText: '',
       activePersona: persona,
+      isMuted: false,
+      isSpeakerOn: true,
+      micLevel: -80,
     });
 
+    // generate script asynchronously, then fill store
     const scriptTurns = await generateCallScript(persona);
     const teleprompterText = buildTeleprompterText(scriptTurns);
 
-    set({
-      scriptTurns,
-      teleprompterText,
-    });
+    set({ scriptTurns, teleprompterText });
   },
+
   answerCall: async (personaOverride) => {
     await stopRingtone();
 
     const persona = personaOverride ?? get().activePersona;
+
     if (!persona) {
       set({
         status: 'idle',
@@ -113,9 +133,12 @@ export const useCallStore = create<CallState>((set, get) => ({
         callStartedAt: null,
         micLevel: -80,
         activePersona: null,
+        isMuted: false,
+        isSpeakerOn: true,
       });
       return;
     }
+
     let { scriptTurns, teleprompterText } = get();
 
     if (scriptTurns.length === 0) {
@@ -123,16 +146,27 @@ export const useCallStore = create<CallState>((set, get) => ({
       teleprompterText = buildTeleprompterText(scriptTurns);
     }
 
+    // entering the call: allow recording + default speaker on
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: true,
+      playsInSilentModeIOS: true,
+      playThroughEarpieceAndroid: false, // speaker by default
+    });
+
     await startMicMetering((level) => get().setMicLevel(level));
 
     set({
       status: 'answered',
       scriptTurns,
       teleprompterText,
+      activeLineIndex: 0,
       callStartedAt: Date.now(),
       activePersona: persona,
+      isMuted: false,
+      isSpeakerOn: true,
     });
   },
+
   endCall: async () => {
     await stopRingtone();
     await stopMicMetering();
@@ -146,7 +180,36 @@ export const useCallStore = create<CallState>((set, get) => ({
       callStartedAt: null,
       micLevel: -80,
       activePersona: null,
+      isMuted: false,
+      isSpeakerOn: true,
     });
+  },
+
+  toggleMute: async () => {
+    const next = !get().isMuted;
+
+    if (next) {
+      await stopMicMetering();
+      set({ isMuted: true, micLevel: -80 });
+      return;
+    }
+
+    await startMicMetering((level) => get().setMicLevel(level));
+    set({ isMuted: false });
+  },
+
+  toggleSpeaker: async () => {
+    const next = !get().isSpeakerOn;
+
+    // speaker ON => playThroughEarpieceAndroid false
+    // speaker OFF => route to earpiece on Android
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: true,
+      playsInSilentModeIOS: true,
+      playThroughEarpieceAndroid: !next,
+    });
+
+    set({ isSpeakerOn: next });
   },
 }));
 

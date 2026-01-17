@@ -51,6 +51,12 @@ export default function RootLayout() {
           name="active-call"
           options={{ presentation: 'fullScreenModal', headerShown: false }}
         />
+        <Stack.Screen
+          name="settings"
+          options={{ presentation: 'modal', headerShown: false }}
+        />
+        <Stack.Screen name="login" options={{ presentation: 'modal', headerShown: false }} />
+        <Stack.Screen name="signup" options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
       </Stack>
       <StatusBar style="dark" />
