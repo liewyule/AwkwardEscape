@@ -25,10 +25,14 @@ const recordingOptions: Audio.RecordingOptions = {
   isMeteringEnabled: true,
 };
 
-export async function startMicMetering(onLevel: (level: number) => void) {
+export async function startMicMetering(onLevel: (level: number) => void): Promise<boolean> {
+  if (recording) {
+    await stopMicMetering();
+  }
+
   const permission = await Audio.requestPermissionsAsync();
   if (!permission.granted) {
-    return;
+    return false;
   }
 
   await Audio.setAudioModeAsync({
@@ -45,6 +49,7 @@ export async function startMicMetering(onLevel: (level: number) => void) {
   });
   recording.setProgressUpdateInterval(250);
   await recording.startAsync();
+  return true;
 }
 
 export async function stopMicMetering() {
@@ -59,4 +64,64 @@ export async function stopMicMetering() {
   } finally {
     recording = null;
   }
+}
+
+type VoiceDetectionResult = {
+  voiceDetected: boolean;
+  permissionGranted: boolean;
+};
+
+export async function detectVoiceActivity({
+  timeoutMs = 7000,
+  thresholdDb = -40,
+  framesRequired = 4,
+}: {
+  timeoutMs?: number;
+  thresholdDb?: number;
+  framesRequired?: number;
+}): Promise<VoiceDetectionResult> {
+  let resolvePromise: (value: VoiceDetectionResult) => void = () => {};
+  let resolved = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const levels: number[] = [];
+
+  const finish = async (voiceDetected: boolean, permissionGranted: boolean) => {
+    if (resolved) {
+      return;
+    }
+    resolved = true;
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    await stopMicMetering();
+    resolvePromise({ voiceDetected, permissionGranted });
+  };
+
+  const promise = new Promise<VoiceDetectionResult>((resolve) => {
+    resolvePromise = resolve;
+  });
+
+  const started = await startMicMetering((level) => {
+    levels.push(level);
+    if (levels.length > framesRequired) {
+      levels.shift();
+    }
+    if (levels.length === framesRequired) {
+      const average = levels.reduce((sum, value) => sum + value, 0) / framesRequired;
+      if (average >= thresholdDb) {
+        void finish(true, true);
+      }
+    }
+  });
+
+  if (!started) {
+    return { voiceDetected: false, permissionGranted: false };
+  }
+
+  timer = setTimeout(() => {
+    void finish(false, true);
+  }, timeoutMs);
+
+  return promise;
 }

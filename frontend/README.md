@@ -4,11 +4,12 @@ AwkwardEscape is a "Social Emergency Exit" app that simulates incoming calls and
 
 ## Features
 
+- Three-page flow (Home, Personas, Modes) with a simple menu
+- Persona CRUD with local persistence (AsyncStorage)
+- Three escape modes: silent message, instant call, or call after silence
 - High-fidelity incoming call UI with ringing, vibration, and answer/decline flow
 - Live Teleprompter overlay synced with the caller TTS
 - Persona Engine with LLM-driven scripts + reliable fallbacks
-- Fake message mode using local notifications
-- Supabase-ready Auth + cloud persona storage (no complex backend)
 
 ## Install dependencies
 
@@ -90,12 +91,15 @@ create policy "Users can insert their personas"
 
 ## Project structure (key files)
 
-- `app/(tabs)/index.tsx` � Home screen with Panic trigger
-- `app/incoming-call.tsx` � High-fidelity incoming call UI
-- `app/active-call.tsx` � Active call UI + Teleprompter
-- `features/callLogic.ts` � Call state machine and audio/vibration orchestration
-- `services/scriptEngine.ts` � Groq SDK generation + fallback scripts
-- `constants/personas.ts` � Built-in persona profiles
+- `app/(tabs)/index.tsx` Home screen with Hold-to-Escape
+- `app/persona.tsx` Persona CRUD + selection
+- `app/mode.tsx` Mode selection
+- `app/incoming-call.tsx` High-fidelity incoming call UI
+- `app/active-call.tsx` Active call UI + Teleprompter
+- `features/callLogic.ts` Call state machine and audio/vibration orchestration
+- `services/scriptEngine.ts` Groq SDK generation + offline templates
+- `services/micMetering.ts` Mic metering + voice detection helper
+- `store/settingsStore.ts` Persona + mode store with persistence
 
 ## How to run successfully (full guide)
 
@@ -104,12 +108,15 @@ create policy "Users can insert their personas"
 3. Ensure `app.json` permissions are set (microphone + notifications).
 4. Start Expo: `npx expo start`.
 5. Use a real device for mic metering and notifications for best results.
-6. On the Home screen, hold the Panic button for 2 seconds to arm a 5-second countdown.
-7. The app auto-starts ringing. Tap Accept to begin the call and Teleprompter.
-8. End the call to reset the state.
+6. On the Home screen, use the top-right menu to pick Personas or Modes.
+7. Hold "Hold to Escape" for 2 seconds to trigger the selected mode.
+8. For instant call mode: the app rings immediately; tap Accept to start the call and Teleprompter.
+9. For silent message mode: a local notification appears.
+10. For voice detection mode: the mic listens for up to 7 seconds; if no voice is detected, the call starts.
 
 ## Notes
 
 - TTS starts only after the user answers the call.
 - If Groq is offline or the key is missing, the app uses built-in fallback scripts.
 - Settings persist locally via AsyncStorage.
+- Voice-detection mode requires microphone permission.

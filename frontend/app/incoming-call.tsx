@@ -1,25 +1,41 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { StatusBar } from 'expo-status-bar';
 
-import { PERSONAS } from '@/constants/personas';
 import { useCallStore } from '@/features/callLogic';
 import { useSettingsStore } from '@/store/settingsStore';
 
 export default function IncomingCallScreen() {
   const router = useRouter();
-  const { status, answerCall, endCall } = useCallStore();
-  const { personaId } = useSettingsStore();
-
-  const persona = PERSONAS.find((item) => item.id === personaId) ?? PERSONAS[0];
+  const { status, answerCall, endCall, activePersona } = useCallStore();
+  const { personas, selectedPersonaId } = useSettingsStore();
+  const statusRef = useRef(status);
+  const fallbackPersona = useMemo(
+    () => personas.find((item) => item.id === selectedPersonaId) ?? personas[0],
+    [personas, selectedPersonaId]
+  );
+  const persona = activePersona ?? fallbackPersona;
 
   useEffect(() => {
-    if (status !== 'ringing') {
+    if (status === 'idle' || status === 'ended') {
       router.replace('/(tabs)');
     }
   }, [status, router]);
+
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
+
+  useEffect(() => {
+    return () => {
+      if (statusRef.current === 'ringing') {
+        void endCall();
+      }
+    };
+  }, [endCall]);
 
   const handleDecline = async () => {
     await endCall();
@@ -27,23 +43,24 @@ export default function IncomingCallScreen() {
   };
 
   const handleAnswer = async () => {
-    await answerCall(persona.id);
+    await answerCall(persona);
     router.replace('/active-call');
   };
 
   return (
     <View style={styles.container}>
+      <StatusBar style="light" />
       <LinearGradient colors={['#020617', '#0F172A', '#1E293B']} style={styles.background} />
       <View style={styles.fauxBlur} />
 
       <View style={styles.header}>
         <Text style={styles.incoming}>Incoming Call</Text>
-        <Text style={styles.name}>{persona.name}</Text>
+        <Text style={styles.name}>{persona.displayName}</Text>
         <Text style={styles.subtext}>mobile</Text>
       </View>
 
       <View style={styles.avatar}>
-        <Text style={styles.avatarText}>{persona.name.slice(0, 1)}</Text>
+        <Text style={styles.avatarText}>{persona.displayName.slice(0, 1)}</Text>
       </View>
 
       <View style={styles.actions}>

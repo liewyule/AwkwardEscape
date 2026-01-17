@@ -12,12 +12,16 @@ export function Teleprompter({ turns, activeIndex }: TeleprompterProps) {
   const listRef = useRef<FlatList<ScriptTurn>>(null);
 
   useEffect(() => {
-    if (!listRef.current || activeIndex < 0) {
+    if (!listRef.current || turns.length === 0) {
+      return;
+    }
+
+    if (activeIndex < 0 || activeIndex >= turns.length) {
       return;
     }
 
     listRef.current.scrollToIndex({
-      index: Math.min(activeIndex, Math.max(0, turns.length - 1)),
+      index: activeIndex,
       animated: true,
       viewPosition: 0.2,
     });

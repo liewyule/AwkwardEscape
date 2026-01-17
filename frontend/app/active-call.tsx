@@ -3,8 +3,8 @@ import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { StatusBar } from 'expo-status-bar';
 
-import { PERSONAS } from '@/constants/personas';
 import { useCallStore } from '@/features/callLogic';
 import { playScript, stopTTS } from '@/services/ttsEngine';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -20,15 +20,24 @@ const formatElapsed = (startAt: number | null) => {
 
 export default function ActiveCallScreen() {
   const router = useRouter();
-  const { status, scriptTurns, activeLineIndex, setActiveLineIndex, callStartedAt, endCall, micLevel } =
-    useCallStore();
-  const { personaId } = useSettingsStore();
+  const {
+    status,
+    scriptTurns,
+    activeLineIndex,
+    setActiveLineIndex,
+    callStartedAt,
+    endCall,
+    micLevel,
+    activePersona,
+  } = useCallStore();
+  const { personas, selectedPersonaId } = useSettingsStore();
   const [elapsed, setElapsed] = useState('00:00');
 
-  const persona = useMemo(
-    () => PERSONAS.find((item) => item.id === personaId) ?? PERSONAS[0],
-    [personaId]
+  const fallbackPersona = useMemo(
+    () => personas.find((item) => item.id === selectedPersonaId) ?? personas[0],
+    [personas, selectedPersonaId]
   );
+  const persona = activePersona ?? fallbackPersona;
 
   useEffect(() => {
     const timer = setInterval(() => setElapsed(formatElapsed(callStartedAt)), 1000);
@@ -52,6 +61,14 @@ export default function ActiveCallScreen() {
     };
   }, [status, scriptTurns, setActiveLineIndex, router]);
 
+  useEffect(() => {
+    return () => {
+      if (status === 'answered') {
+        void endCall();
+      }
+    };
+  }, [status, endCall]);
+
   const handleEnd = async () => {
     stopTTS();
     await endCall();
@@ -60,10 +77,11 @@ export default function ActiveCallScreen() {
 
   return (
     <View style={styles.container}>
+      <StatusBar style="light" />
       <LinearGradient colors={['#040509', '#0B1320', '#1E293B']} style={styles.background} />
 
       <View style={styles.header}>
-        <Text style={styles.name}>{persona.name}</Text>
+        <Text style={styles.name}>{persona.displayName}</Text>
         <Text style={styles.timer}>{elapsed}</Text>
         <View style={styles.micMeter}
           >

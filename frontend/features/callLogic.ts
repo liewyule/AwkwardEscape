@@ -2,8 +2,8 @@ import { Audio } from 'expo-av';
 import { Vibration } from 'react-native';
 import { create } from 'zustand';
 
-import { PERSONAS } from '@/constants/personas';
-import { buildTeleprompterText, generateScript } from '@/services/scriptEngine';
+import type { PersonaProfile } from '@/constants/personas';
+import { buildTeleprompterText, generateCallScript } from '@/services/scriptEngine';
 import { startMicMetering, stopMicMetering } from '@/services/micMetering';
 import type { CallStatus, ScriptTurn } from '@/types/call';
 
@@ -19,10 +19,11 @@ type CallState = {
   activeLineIndex: number;
   callStartedAt: number | null;
   micLevel: number;
+  activePersona: PersonaProfile | null;
   setCountdown: (value: number) => void;
   setActiveLineIndex: (index: number) => void;
-  startRinging: (personaId: string) => Promise<void>;
-  answerCall: (personaId: string) => Promise<void>;
+  startRinging: (persona: PersonaProfile) => Promise<void>;
+  answerCall: (persona?: PersonaProfile) => Promise<void>;
   endCall: () => Promise<void>;
   resetCall: () => void;
   setMicLevel: (level: number) => void;
@@ -51,6 +52,7 @@ export const useCallStore = create<CallState>((set, get) => ({
   activeLineIndex: 0,
   callStartedAt: null,
   micLevel: -80,
+  activePersona: null,
   setCountdown: (value) => set({ countdown: value }),
   setActiveLineIndex: (index) => set({ activeLineIndex: index }),
   setMicLevel: (level) => set({ micLevel: level }),
@@ -63,10 +65,9 @@ export const useCallStore = create<CallState>((set, get) => ({
       activeLineIndex: 0,
       callStartedAt: null,
       micLevel: -80,
+      activePersona: null,
     }),
-  startRinging: async (personaId) => {
-    const persona = PERSONAS.find((item) => item.id === personaId) ?? PERSONAS[0];
-
+  startRinging: async (persona) => {
     await Audio.setAudioModeAsync({
       playsInSilentModeIOS: true,
       allowsRecordingIOS: false,
@@ -85,9 +86,13 @@ export const useCallStore = create<CallState>((set, get) => ({
     set({
       status: 'ringing',
       activeLineIndex: 0,
+      callStartedAt: null,
+      scriptTurns: [],
+      teleprompterText: '',
+      activePersona: persona,
     });
 
-    const scriptTurns = await generateScript(persona);
+    const scriptTurns = await generateCallScript(persona);
     const teleprompterText = buildTeleprompterText(scriptTurns);
 
     set({
@@ -95,14 +100,26 @@ export const useCallStore = create<CallState>((set, get) => ({
       teleprompterText,
     });
   },
-  answerCall: async (personaId) => {
+  answerCall: async (personaOverride) => {
     await stopRingtone();
 
-    const persona = PERSONAS.find((item) => item.id === personaId) ?? PERSONAS[0];
+    const persona = personaOverride ?? get().activePersona;
+    if (!persona) {
+      set({
+        status: 'idle',
+        scriptTurns: [],
+        teleprompterText: '',
+        activeLineIndex: 0,
+        callStartedAt: null,
+        micLevel: -80,
+        activePersona: null,
+      });
+      return;
+    }
     let { scriptTurns, teleprompterText } = get();
 
     if (scriptTurns.length === 0) {
-      scriptTurns = await generateScript(persona);
+      scriptTurns = await generateCallScript(persona);
       teleprompterText = buildTeleprompterText(scriptTurns);
     }
 
@@ -113,6 +130,7 @@ export const useCallStore = create<CallState>((set, get) => ({
       scriptTurns,
       teleprompterText,
       callStartedAt: Date.now(),
+      activePersona: persona,
     });
   },
   endCall: async () => {
@@ -121,7 +139,13 @@ export const useCallStore = create<CallState>((set, get) => ({
 
     set({
       status: 'ended',
+      countdown: 0,
+      scriptTurns: [],
+      teleprompterText: '',
+      activeLineIndex: 0,
       callStartedAt: null,
+      micLevel: -80,
+      activePersona: null,
     });
   },
 }));
