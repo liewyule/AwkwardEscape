@@ -3,18 +3,17 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { DEFAULT_PERSONAS, type PersonaProfile } from '@/constants/personas';
-import type { CallMode } from '@/types/call';
 
 type SettingsState = {
   personas: PersonaProfile[];
   selectedPersonaId: string;
-  selectedMode: CallMode;
   voiceId: string;
+  voiceGuardWindowMinutes: number;
   addPersona: (persona: Omit<PersonaProfile, 'id'>) => void;
   deletePersona: (personaId: string) => void;
   selectPersona: (personaId: string) => void;
-  setMode: (mode: CallMode) => void;
   setVoiceId: (voiceId: string) => void;
+  setVoiceGuardWindowMinutes: (minutes: number) => void;
 };
 
 const createPersonaId = () =>
@@ -37,8 +36,8 @@ export const useSettingsStore = create<SettingsState>()(
     (set) => ({
       personas: DEFAULT_PERSONAS,
       selectedPersonaId: DEFAULT_PERSONAS[0].id,
-      selectedMode: 'instant_call',
       voiceId: 'en-US-Standard-B',
+      voiceGuardWindowMinutes: 30,
 
       addPersona: (persona) =>
         set((state) => {
@@ -66,8 +65,8 @@ export const useSettingsStore = create<SettingsState>()(
         }),
 
       selectPersona: (personaId) => set({ selectedPersonaId: personaId }),
-      setMode: (mode) => set({ selectedMode: mode }),
       setVoiceId: (voiceId) => set({ voiceId }),
+      setVoiceGuardWindowMinutes: (minutes) => set({ voiceGuardWindowMinutes: minutes }),
     }),
     {
       name: 'awkwardescape-settings',
@@ -77,8 +76,8 @@ export const useSettingsStore = create<SettingsState>()(
         const normalized = normalizeSelection(state.personas, state.selectedPersonaId);
         state.personas = normalized.personas;
         state.selectedPersonaId = normalized.selectedPersonaId;
-        if (!state.selectedMode) {
-          state.selectedMode = 'instant_call';
+        if (!state.voiceGuardWindowMinutes) {
+          state.voiceGuardWindowMinutes = 30;
         }
       },
     }

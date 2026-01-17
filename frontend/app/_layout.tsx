@@ -41,9 +41,6 @@ export default function RootLayout() {
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="persona" options={{ headerShown: false }} />
-        <Stack.Screen name="mode" options={{ headerShown: false }} />
-        <Stack.Screen name="voices" options={{ headerShown: false }} />
         <Stack.Screen
           name="incoming-call"
           options={{ presentation: 'fullScreenModal', headerShown: false }}
@@ -52,10 +49,7 @@ export default function RootLayout() {
           name="active-call"
           options={{ presentation: 'fullScreenModal', headerShown: false }}
         />
-        <Stack.Screen
-          name="settings"
-          options={{ presentation: 'modal', headerShown: false }}
-        />
+        <Stack.Screen name="settings" options={{ headerShown: false }} />
         <Stack.Screen name="login" options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen name="signup" options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />

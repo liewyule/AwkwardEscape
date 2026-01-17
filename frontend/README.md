@@ -6,7 +6,7 @@ AwkwardEscape is a "Social Emergency Exit" app that simulates incoming calls and
 
 - Hold-to-escape Home flow (2s press-and-hold with progress)
 - Persona manager (add/select/delete) with local persistence
-- Three modes: silent message, instant call, voice-guard call
+- Instant call button + silence-session mode (auto-calls after 7s of silence)
 - Incoming call UI with ringing, vibration, and answer/decline flow
 - Teleprompter + TTS during active calls
 - Offline-friendly script generation with optional Groq/LLM support
@@ -34,25 +34,21 @@ EXPO_PUBLIC_GCP_TTS_API_KEY=your_google_cloud_tts_key
 
 The app works without any external keys by using offline templates + Expo Speech.
 
-## New flow (Home -> Personas/Modes)
+## New flow (Home -> Settings)
 
 1. Home screen shows a single Hold-to-Escape button.
-2. Tap the top-right menu to manage Personas or Modes.
-3. Press and hold for 2 seconds to trigger the current mode:
-   - Silent message: schedules a local notification.
-   - Instant loud call: immediately shows the incoming call screen.
-   - Voice guard: listens for 7 seconds and triggers a call only if no voice is detected.
+2. Tap the top-right menu to manage Settings (personas + session length).
+3. Press and hold for 2 seconds to trigger the instant call.
+4. Use Start Session to listen for 7 seconds of silence during the session window (End Session stops it).
 
 ## Permissions
 
-- Microphone permission is required for the Voice Guard mode.
-- Notification permission is required for Silent Message mode.
+- Microphone permission is required for the silence-session mode.
 
 ## Project structure (key files)
 
 - `app/(tabs)/index.tsx` Home screen with Hold-to-Escape
-- `app/persona.tsx` Personas CRUD + selection
-- `app/mode.tsx` Mode selection
+- `app/settings.tsx` Settings (personas + session length)
 - `app/incoming-call.tsx` Incoming call UI
 - `app/active-call.tsx` Active call + teleprompter
 - `features/callLogic.ts` Call state + ringtone + mic metering

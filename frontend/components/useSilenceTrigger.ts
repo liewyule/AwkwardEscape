@@ -6,6 +6,7 @@ export type SilenceTriggerOptions = {
   silenceMs?: number;
   sampleEveryMs?: number;
   onSilence: () => void;
+  enabled?: boolean;
 };
 
 const DEFAULT_SILENCE_DB = -20;
@@ -41,6 +42,7 @@ export function useSilenceTrigger(options: SilenceTriggerOptions) {
     silenceMs = DEFAULT_SILENCE_MS,
     sampleEveryMs = DEFAULT_SAMPLE_MS,
     onSilence,
+    enabled = true,
   } = options;
   const recordingRef = useRef<Audio.Recording | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -61,6 +63,7 @@ export function useSilenceTrigger(options: SilenceTriggerOptions) {
       intervalRef.current = null;
       silenceStartRef.current = null;
       triggeredRef.current = false;
+      startingRef.current = false;
       setMeterDb(null);
       setSilenceElapsedMs(0);
 
@@ -145,13 +148,17 @@ export function useSilenceTrigger(options: SilenceTriggerOptions) {
       startingRef.current = false;
     };
 
-    start();
+    if (enabled) {
+      start();
+    } else {
+      stopPromiseRef.current = stopExisting();
+    }
 
     return () => {
       isActive = false;
       stopPromiseRef.current = stopExisting();
     };
-  }, [onSilence, sampleEveryMs, silenceDbThreshold, silenceMs]);
+  }, [enabled, onSilence, sampleEveryMs, silenceDbThreshold, silenceMs]);
 
   return {
     meterDb,

@@ -1,3 +1,4 @@
+import { Audio } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -5,32 +6,52 @@ import { Animated, Modal, Pressable, StyleSheet, Text, View } from 'react-native
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 
+import { useSilenceTrigger } from '@/components/useSilenceTrigger';
 import { useCallStore } from '@/features/callLogic';
-import { scheduleFakeMessage } from '@/services/notificationEngine';
-import { detectVoiceActivity } from '@/services/micMetering';
-import { generateMessageText } from '@/services/scriptEngine';
 import { useSettingsStore } from '@/store/settingsStore';
 
 const HOLD_DURATION_MS = 2000;
+const VOICE_GUARD_SILENCE_MS = 7000;
+const VOICE_GUARD_DB_THRESHOLD = -40;
+const VOICE_GUARD_SAMPLE_MS = 200;
+const VOICE_GUARD_TIMER_TICK_MS = 250;
+
+const formatCountdown = (durationMs: number) => {
+  const totalSeconds = Math.max(0, Math.ceil(durationMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+};
 
 export default function HomeScreen() {
   const router = useRouter();
   const { startRinging } = useCallStore();
-  const { personas, selectedPersonaId, selectedMode } = useSettingsStore();
+  const { personas, selectedPersonaId, voiceGuardWindowMinutes } = useSettingsStore();
 
   const [menuVisible, setMenuVisible] = useState(false);
   const [statusNote, setStatusNote] = useState<string | null>(null);
   const [isHolding, setIsHolding] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [isCallProcessing, setIsCallProcessing] = useState(false);
+  const [isSessionProcessing, setIsSessionProcessing] = useState(false);
+  const [voiceGuardActive, setVoiceGuardActive] = useState(false);
+  const [sessionElapsedMs, setSessionElapsedMs] = useState(0);
+  const [sessionTotalMs, setSessionTotalMs] = useState(
+    () => voiceGuardWindowMinutes * 60 * 1000
+  );
 
   const progress = useRef(new Animated.Value(0)).current;
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const holdCompletedRef = useRef(false);
   const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const voiceGuardActiveRef = useRef(false);
 
   const selectedPersona = useMemo(
     () => personas.find((persona) => persona.id === selectedPersonaId) ?? personas[0],
     [personas, selectedPersonaId]
+  );
+  const voiceGuardWindowMs = useMemo(
+    () => voiceGuardWindowMinutes * 60 * 1000,
+    [voiceGuardWindowMinutes]
   );
 
   const setStatus = useCallback((message: string | null, durationMs = 2200) => {
@@ -42,6 +63,90 @@ export default function HomeScreen() {
       statusTimerRef.current = setTimeout(() => setStatusNote(null), durationMs);
     }
   }, []);
+
+  const startVoiceGuardSession = useCallback(() => {
+    voiceGuardActiveRef.current = true;
+    setVoiceGuardActive(true);
+    setSessionTotalMs(voiceGuardWindowMs);
+    setSessionElapsedMs(0);
+  }, [voiceGuardWindowMs]);
+
+  const endVoiceGuardSession = useCallback(
+    (options?: { message?: string | null; durationMs?: number }) => {
+      voiceGuardActiveRef.current = false;
+      setVoiceGuardActive(false);
+      setSessionElapsedMs(0);
+      if (options && Object.prototype.hasOwnProperty.call(options, 'message')) {
+        setStatus(options.message ?? null, options.durationMs);
+      }
+    },
+    [setStatus]
+  );
+
+  const handleVoiceGuardSilence = useCallback(async () => {
+    if (!voiceGuardActiveRef.current) {
+      return;
+    }
+
+    endVoiceGuardSession({ message: null });
+
+    if (!selectedPersona) {
+      setStatus('Add a persona to continue.');
+      return;
+    }
+
+    setStatus('Silence detected. Starting call...');
+    setIsCallProcessing(true);
+    try {
+      await startRinging(selectedPersona, 'voice_guard');
+      router.push('/incoming-call');
+    } finally {
+      setIsCallProcessing(false);
+    }
+  }, [endVoiceGuardSession, router, selectedPersona, setStatus, startRinging]);
+
+  const { meterDb, silenceElapsedMs } = useSilenceTrigger({
+    enabled: voiceGuardActive,
+    silenceDbThreshold: VOICE_GUARD_DB_THRESHOLD,
+    silenceMs: VOICE_GUARD_SILENCE_MS,
+    sampleEveryMs: VOICE_GUARD_SAMPLE_MS,
+    onSilence: handleVoiceGuardSilence,
+  });
+
+  useEffect(() => {
+    voiceGuardActiveRef.current = voiceGuardActive;
+  }, [voiceGuardActive]);
+
+  useEffect(() => {
+    if (!voiceGuardActive) {
+      setSessionTotalMs(voiceGuardWindowMs);
+    }
+  }, [voiceGuardActive, voiceGuardWindowMs]);
+
+  useEffect(() => {
+    if (!voiceGuardActive) {
+      return;
+    }
+
+    const startedAt = Date.now();
+    const interval = setInterval(() => {
+      if (!voiceGuardActiveRef.current) {
+        return;
+      }
+
+      const elapsed = Date.now() - startedAt;
+      if (elapsed >= sessionTotalMs) {
+        endVoiceGuardSession({
+          message: 'No silence detected. Start a new session to listen again.',
+        });
+        return;
+      }
+
+      setSessionElapsedMs(elapsed);
+    }, VOICE_GUARD_TIMER_TICK_MS);
+
+    return () => clearInterval(interval);
+  }, [endVoiceGuardSession, sessionTotalMs, voiceGuardActive]);
 
   useEffect(() => {
     return () => {
@@ -58,58 +163,61 @@ export default function HomeScreen() {
     }).start();
   }, [progress]);
 
-  const triggerEscape = useCallback(async () => {
+  const triggerInstantCall = useCallback(async () => {
     if (!selectedPersona) {
       setStatus('Add a persona to continue.');
       resetProgress();
       return;
     }
 
-    setIsProcessing(true);
-
+    setIsCallProcessing(true);
     try {
-      if (selectedMode === 'silent_message') {
-        const seed = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-        const message = await generateMessageText(selectedPersona, seed);
-        await scheduleFakeMessage(selectedPersona.displayName, message);
-        setStatus('Silent message scheduled.');
-        return;
+      if (voiceGuardActiveRef.current) {
+        endVoiceGuardSession({ message: null });
       }
+      await startRinging(selectedPersona, 'instant_call');
+      router.push('/incoming-call');
+    } finally {
+      setIsCallProcessing(false);
+      resetProgress();
+    }
+  }, [endVoiceGuardSession, resetProgress, router, selectedPersona, setStatus, startRinging]);
 
-      if (selectedMode === 'instant_call') {
-        await startRinging(selectedPersona, selectedMode);
-        router.push('/incoming-call');
-        return;
-      }
+  const handleStartSession = useCallback(async () => {
+    if (voiceGuardActiveRef.current || isSessionProcessing || isCallProcessing) {
+      return;
+    }
 
-      setStatus('Listening for voice for 7 seconds...', 0);
-      const result = await detectVoiceActivity({
-        timeoutMs: 7000,
-        thresholdDb: -40,
-        framesRequired: 4,
-      });
-
-      if (!result.permissionGranted) {
+    setIsSessionProcessing(true);
+    try {
+      const permission = await Audio.requestPermissionsAsync();
+      if (!permission.granted) {
         setStatus('Mic permission is required for voice detection.');
         return;
       }
 
-      if (result.voiceDetected) {
-        setStatus('Voice detected. Call not started.');
-        return;
-      }
-
-      setStatus('No voice detected. Starting call...');
-      await startRinging(selectedPersona, selectedMode);
-      router.push('/incoming-call');
+      startVoiceGuardSession();
+      setStatus(`Session started (${voiceGuardWindowMinutes} min).`, 2200);
     } finally {
-      setIsProcessing(false);
-      resetProgress();
+      setIsSessionProcessing(false);
     }
-  }, [resetProgress, router, selectedMode, selectedPersona, setStatus, startRinging]);
+  }, [
+    isCallProcessing,
+    isSessionProcessing,
+    setStatus,
+    startVoiceGuardSession,
+    voiceGuardWindowMinutes,
+  ]);
+
+  const handleEndSession = useCallback(() => {
+    if (!voiceGuardActiveRef.current) {
+      return;
+    }
+    endVoiceGuardSession({ message: 'Session ended.' });
+  }, [endVoiceGuardSession]);
 
   const beginHold = useCallback(() => {
-    if (isProcessing || isHolding) return;
+    if (isCallProcessing || isHolding) return;
 
     holdCompletedRef.current = false;
     setIsHolding(true);
@@ -124,9 +232,9 @@ export default function HomeScreen() {
       holdCompletedRef.current = true;
       setIsHolding(false);
       holdTimerRef.current = null;
-      void triggerEscape();
+      void triggerInstantCall();
     }, HOLD_DURATION_MS);
-  }, [isHolding, isProcessing, progress, triggerEscape]);
+  }, [isCallProcessing, isHolding, progress, triggerInstantCall]);
 
   const cancelHold = useCallback(() => {
     if (holdCompletedRef.current) return;
@@ -144,6 +252,26 @@ export default function HomeScreen() {
     inputRange: [0, 1],
     outputRange: [0, 220],
   });
+  const silenceRemainingMs = voiceGuardActive
+    ? Math.max(VOICE_GUARD_SILENCE_MS - silenceElapsedMs, 0)
+    : VOICE_GUARD_SILENCE_MS;
+  const sessionRemainingMs = voiceGuardActive
+    ? Math.max(sessionTotalMs - sessionElapsedMs, 0)
+    : voiceGuardWindowMs;
+  const meterLabel =
+    voiceGuardActive && meterDb !== null ? `${Math.round(meterDb)} dB` : '-- dB';
+  const buttonLabel = isCallProcessing ? 'Calling...' : 'Instant Call';
+  const buttonHint = isHolding ? 'Keep holding...' : 'Hold for 2 seconds';
+  const startSessionLabel = isSessionProcessing
+    ? 'Starting...'
+    : voiceGuardActive
+      ? 'Session Active'
+      : 'Start Session';
+  const endSessionLabel = isSessionProcessing ? 'Stopping...' : 'End Session';
+  const startSessionDisabled =
+    voiceGuardActive || isSessionProcessing || isCallProcessing;
+  const endSessionDisabled =
+    !voiceGuardActive || isSessionProcessing || isCallProcessing;
 
   return (
     <View style={styles.container}>
@@ -170,14 +298,39 @@ export default function HomeScreen() {
       </View>
 
       <View style={styles.centerContent}>
+        <View style={styles.sessionControls}>
+          <Pressable
+            onPress={handleStartSession}
+            disabled={startSessionDisabled}
+            style={({ pressed }) => [
+              styles.sessionButton,
+              styles.sessionButtonPrimary,
+              pressed && !startSessionDisabled && styles.sessionButtonPressed,
+              startSessionDisabled && styles.sessionButtonDisabled,
+            ]}>
+            <Text style={styles.sessionButtonText}>{startSessionLabel}</Text>
+          </Pressable>
+          <Pressable
+            onPress={handleEndSession}
+            disabled={endSessionDisabled}
+            style={({ pressed }) => [
+              styles.sessionButton,
+              styles.sessionButtonSecondary,
+              pressed && !endSessionDisabled && styles.sessionButtonPressed,
+              endSessionDisabled && styles.sessionButtonDisabled,
+            ]}>
+            <Text style={styles.sessionButtonTextSecondary}>{endSessionLabel}</Text>
+          </Pressable>
+        </View>
+
         <Pressable
           onPressIn={beginHold}
           onPressOut={cancelHold}
-          disabled={isProcessing}
+          disabled={isCallProcessing}
           style={({ pressed }) => [
             styles.panicButton,
-            pressed && !isProcessing && { transform: [{ scale: 0.98 }] },
-            isProcessing && { opacity: 0.8 },
+            pressed && !isCallProcessing && { transform: [{ scale: 0.98 }] },
+            isCallProcessing && { opacity: 0.8 },
           ]}>
           <Animated.View
             style={[
@@ -190,12 +343,31 @@ export default function HomeScreen() {
               },
             ]}
           />
-          <Text style={styles.panicText}>{isProcessing ? 'Working...' : 'Hold to Escape'}</Text>
-          <Text style={styles.panicHint}>{isHolding ? 'Keep holding...' : 'Hold for 2 seconds'}</Text>
+          <Text style={styles.panicText}>{buttonLabel}</Text>
+          <Text style={styles.panicHint}>{buttonHint}</Text>
         </Pressable>
 
         <View style={styles.progressTrack}>
           <Animated.View style={[styles.progressFill, { width: progressWidth }]} />
+        </View>
+
+        <View style={styles.voiceGuardPanel}>
+          <View style={styles.voiceGuardRow}>
+            <Text style={styles.voiceGuardLabel}>Silence window</Text>
+            <Text style={styles.voiceGuardValue}>
+              {formatCountdown(silenceRemainingMs)}
+            </Text>
+          </View>
+          <View style={styles.voiceGuardRow}>
+            <Text style={styles.voiceGuardLabel}>Session window</Text>
+            <Text style={styles.voiceGuardValue}>
+              {formatCountdown(sessionRemainingMs)}
+            </Text>
+          </View>
+          <View style={styles.voiceGuardRow}>
+            <Text style={styles.voiceGuardLabel}>Mic level</Text>
+            <Text style={styles.voiceGuardValue}>{meterLabel}</Text>
+          </View>
         </View>
 
         {selectedPersona && (
@@ -218,19 +390,9 @@ export default function HomeScreen() {
               style={styles.menuItem}
               onPress={() => {
                 setMenuVisible(false);
-                router.push('/persona');
+                router.push('/settings');
               }}>
-              <Text style={styles.menuText}>Personas</Text>
-              <Ionicons name="chevron-forward" size={18} color="#0F172A" />
-            </Pressable>
-
-            <Pressable
-              style={styles.menuItem}
-              onPress={() => {
-                setMenuVisible(false);
-                router.push('/mode');
-              }}>
-              <Text style={styles.menuText}>Modes</Text>
+              <Text style={styles.menuText}>Settings</Text>
               <Ionicons name="chevron-forward" size={18} color="#0F172A" />
             </Pressable>
 
@@ -322,6 +484,46 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 18,
   },
+  sessionControls: {
+    width: '100%',
+    maxWidth: 320,
+    gap: 10,
+  },
+  sessionButton: {
+    paddingVertical: 12,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  sessionButtonPrimary: {
+    backgroundColor: '#0F172A',
+    borderColor: '#0F172A',
+  },
+  sessionButtonSecondary: {
+    backgroundColor: '#FFFFFF',
+    borderColor: 'rgba(15, 23, 42, 0.2)',
+  },
+  sessionButtonPressed: {
+    transform: [{ scale: 0.98 }],
+  },
+  sessionButtonDisabled: {
+    opacity: 0.5,
+  },
+  sessionButtonText: {
+    color: '#F8FAFC',
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    fontFamily: 'SpaceGrotesk_600SemiBold',
+  },
+  sessionButtonTextSecondary: {
+    color: '#0F172A',
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    fontFamily: 'SpaceGrotesk_600SemiBold',
+  },
   panicButton: {
     width: 220,
     height: 220,
@@ -364,6 +566,39 @@ const styles = StyleSheet.create({
   progressFill: {
     height: '100%',
     backgroundColor: 'rgba(56, 189, 248, 0.8)',
+  },
+  voiceGuardPanel: {
+    width: '100%',
+    maxWidth: 320,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.2)',
+    shadowColor: '#94A3B8',
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 3,
+  },
+  voiceGuardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  voiceGuardLabel: {
+    color: '#64748B',
+    fontSize: 11,
+    fontFamily: 'SpaceGrotesk_500Medium',
+    textTransform: 'uppercase',
+    letterSpacing: 1.1,
+  },
+  voiceGuardValue: {
+    color: '#0F172A',
+    fontSize: 14,
+    fontFamily: 'SpaceGrotesk_600SemiBold',
   },
   activeMeta: {
     color: '#64748B',
