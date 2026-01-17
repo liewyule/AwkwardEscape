@@ -1,16 +1,69 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
+import {
+  RELATIONSHIP_LABELS,
+  RELATIONSHIP_OPTIONS,
+  type RelationshipType,
+} from '@/constants/personas';
 import { VOICES } from '@/constants/voices';
-import { useSettingsStore } from '@/store/settingsStore';
 import { supabase } from '@/services/supabaseClient';
+import { useSettingsStore } from '@/store/settingsStore';
+
+const SESSION_MINUTES_MIN = 5;
+const SESSION_MINUTES_MAX = 120;
+const SESSION_MINUTES_STEP = 5;
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { voiceId, setVoiceId } = useSettingsStore();
+  const {
+    personas,
+    selectedPersonaId,
+    selectPersona,
+    addPersona,
+    deletePersona,
+    voiceId,
+    setVoiceId,
+    voiceGuardWindowMinutes,
+    setVoiceGuardWindowMinutes,
+  } = useSettingsStore();
+
+  const [displayName, setDisplayName] = useState('');
+  const [relationshipType, setRelationshipType] = useState<RelationshipType>('friend');
+  const [defaultTheme, setDefaultTheme] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const selectedPersona = useMemo(
+    () => personas.find((persona) => persona.id === selectedPersonaId),
+    [personas, selectedPersonaId]
+  );
+
+  const clampMinutes = (value: number) =>
+    Math.min(SESSION_MINUTES_MAX, Math.max(SESSION_MINUTES_MIN, value));
+
+  const updateSessionMinutes = (delta: number) => {
+    setVoiceGuardWindowMinutes(clampMinutes(voiceGuardWindowMinutes + delta));
+  };
+
+  const handleAdd = () => {
+    if (!displayName.trim()) {
+      setError('Enter a display name.');
+      return;
+    }
+
+    addPersona({
+      displayName,
+      relationshipType,
+      defaultTheme: defaultTheme.trim() || undefined,
+    });
+
+    setDisplayName('');
+    setRelationshipType('friend');
+    setDefaultTheme('');
+    setError(null);
+  };
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -19,41 +72,174 @@ export default function SettingsScreen() {
 
   return (
     <View style={styles.container}>
-      <LinearGradient colors={['#0B0F1A', '#111927', '#1B2735']} style={styles.background} />
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="chevron-back" size={22} color="#E2E8F0" />
-          <Text style={styles.backLabel}>Back</Text>
+        <Pressable style={styles.backButton} onPress={() => router.back()}>
+          <Ionicons name="chevron-back" size={22} color="#0F172A" />
         </Pressable>
-        <Text style={styles.title}>Settings</Text>
-        <View style={{ width: 64 }} />
+        <View>
+          <Text style={styles.title}>Settings</Text>
+          <Text style={styles.subtitle}>Personas and sessions</Text>
+        </View>
       </View>
 
-      <Text style={styles.sectionTitle}>Caller Voice</Text>
-      <Text style={styles.sectionHint}>
-        Select which Google Cloud TTS voice is used for the caller.
-      </Text>
-
-      <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
-        {VOICES.map((voice) => {
-          const active = voice.id === voiceId;
-          return (
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Session</Text>
+          <Text style={styles.sectionHint}>
+            Set how long Start Session listens for 7-second silence.
+          </Text>
+          <View style={styles.sessionControls}>
             <Pressable
-              key={voice.id}
-              onPress={() => setVoiceId(voice.id)}
-              style={[styles.voiceCard, active && styles.voiceCardActive]}>
-              <View>
-                <Text style={[styles.voiceLabel, active && styles.voiceLabelActive]}>
-                  {voice.label}
-                </Text>
-                <Text style={styles.voiceMeta}>{voice.name}</Text>
-              </View>
-              {active && <Ionicons name="checkmark-circle" size={22} color="#FDE68A" />}
+              onPress={() => updateSessionMinutes(-SESSION_MINUTES_STEP)}
+              disabled={voiceGuardWindowMinutes <= SESSION_MINUTES_MIN}
+              style={({ pressed }) => [
+                styles.sessionButton,
+                pressed && styles.sessionButtonPressed,
+                voiceGuardWindowMinutes <= SESSION_MINUTES_MIN &&
+                  styles.sessionButtonDisabled,
+              ]}>
+              <Ionicons name="remove" size={16} color="#0F172A" />
             </Pressable>
-          );
-        })}
+            <Text style={styles.sessionValue}>{voiceGuardWindowMinutes} min</Text>
+            <Pressable
+              onPress={() => updateSessionMinutes(SESSION_MINUTES_STEP)}
+              disabled={voiceGuardWindowMinutes >= SESSION_MINUTES_MAX}
+              style={({ pressed }) => [
+                styles.sessionButton,
+                pressed && styles.sessionButtonPressed,
+                voiceGuardWindowMinutes >= SESSION_MINUTES_MAX &&
+                  styles.sessionButtonDisabled,
+              ]}>
+              <Ionicons name="add" size={16} color="#0F172A" />
+            </Pressable>
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Selected Persona</Text>
+          <View style={styles.selectedCard}>
+            <Text style={styles.selectedName}>
+              {selectedPersona?.displayName ?? 'None'}
+            </Text>
+            <Text style={styles.selectedMeta}>
+              {selectedPersona
+                ? `${RELATIONSHIP_LABELS[selectedPersona.relationshipType]}`
+                : 'Select a persona below'}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>All Personas</Text>
+          {personas.map((persona) => {
+            const isSelected = persona.id === selectedPersonaId;
+            return (
+              <Pressable
+                key={persona.id}
+                onPress={() => selectPersona(persona.id)}
+                style={[styles.personaCard, isSelected && styles.personaCardActive]}>
+                <View>
+                  <Text style={[styles.personaName, isSelected && styles.personaNameActive]}>
+                    {persona.displayName}
+                  </Text>
+                  <Text style={styles.personaMeta}>
+                    {RELATIONSHIP_LABELS[persona.relationshipType]}
+                    {persona.defaultTheme ? ` - ${persona.defaultTheme}` : ''}
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={() => deletePersona(persona.id)}
+                  style={styles.deleteButton}>
+                  <Ionicons name="trash-outline" size={18} color="#DC2626" />
+                </Pressable>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Add Persona</Text>
+          <View style={styles.formField}>
+            <Text style={styles.inputLabel}>Display Name</Text>
+            <TextInput
+              value={displayName}
+              onChangeText={setDisplayName}
+              placeholder="Strict Boss"
+              placeholderTextColor="#94A3B8"
+              style={styles.input}
+            />
+          </View>
+
+          <View style={styles.formField}>
+            <Text style={styles.inputLabel}>Relationship</Text>
+            <View style={styles.relationshipRow}>
+              {RELATIONSHIP_OPTIONS.map((option) => {
+                const active = option === relationshipType;
+                return (
+                  <Pressable
+                    key={option}
+                    onPress={() => setRelationshipType(option)}
+                    style={[
+                      styles.relationshipChip,
+                      active && styles.relationshipChipActive,
+                    ]}>
+                    <Text
+                      style={[
+                        styles.relationshipText,
+                        active && styles.relationshipTextActive,
+                      ]}>
+                      {RELATIONSHIP_LABELS[option]}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+
+          <View style={styles.formField}>
+            <Text style={styles.inputLabel}>Default Theme (optional)</Text>
+            <TextInput
+              value={defaultTheme}
+              onChangeText={setDefaultTheme}
+              placeholder="urgent work update"
+              placeholderTextColor="#94A3B8"
+              style={styles.input}
+            />
+          </View>
+
+          {error && <Text style={styles.error}>{error}</Text>}
+
+          <Pressable style={styles.addButton} onPress={handleAdd}>
+            <Text style={styles.addButtonText}>Add Persona</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Caller Voice</Text>
+          <Text style={styles.sectionHint}>
+            Select which Google Cloud TTS voice is used for the caller.
+          </Text>
+          {VOICES.map((voice) => {
+            const active = voice.id === voiceId;
+            return (
+              <Pressable
+                key={voice.id}
+                onPress={() => setVoiceId(voice.id)}
+                style={[styles.voiceCard, active && styles.voiceCardActive]}>
+                <View>
+                  <Text style={[styles.voiceLabel, active && styles.voiceLabelActive]}>
+                    {voice.label}
+                  </Text>
+                  <Text style={styles.voiceMeta}>{voice.name}</Text>
+                </View>
+                {active && <Ionicons name="checkmark-circle" size={20} color="#0F172A" />}
+              </Pressable>
+            );
+          })}
+        </View>
+
         <Pressable style={styles.logoutButton} onPress={handleLogout}>
-          <Ionicons name="log-out-outline" size={18} color="#F8FAFC" />
+          <Ionicons name="log-out-outline" size={18} color="#DC2626" />
           <Text style={styles.logoutText}>Log out</Text>
         </Pressable>
       </ScrollView>
@@ -64,81 +250,231 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingTop: 70,
+    backgroundColor: '#FFFFFF',
+    paddingTop: 68,
     paddingHorizontal: 22,
-  },
-  background: {
-    ...StyleSheet.absoluteFillObject,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 24,
+    gap: 12,
+    marginBottom: 18,
   },
   backButton: {
-    flexDirection: 'row',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
-    gap: 6,
-  },
-  backLabel: {
-    color: '#E2E8F0',
-    fontSize: 14,
-    fontFamily: 'SpaceGrotesk_500Medium',
+    justifyContent: 'center',
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.25)',
   },
   title: {
-    color: '#F8FAFC',
-    fontSize: 22,
+    color: '#0F172A',
+    fontSize: 24,
     fontFamily: 'SpaceGrotesk_600SemiBold',
   },
-  sectionTitle: {
-    color: '#E2E8F0',
-    fontSize: 14,
+  subtitle: {
+    color: '#64748B',
+    fontSize: 12,
+    fontFamily: 'SpaceGrotesk_400Regular',
+    textTransform: 'uppercase',
+    letterSpacing: 1.2,
+    marginTop: 4,
+  },
+  scrollContent: {
+    paddingBottom: 40,
+  },
+  section: {
+    marginBottom: 24,
+  },
+  sectionLabel: {
+    color: '#0F172A',
+    fontSize: 12,
     fontFamily: 'SpaceGrotesk_600SemiBold',
     textTransform: 'uppercase',
-    letterSpacing: 1,
+    letterSpacing: 1.4,
+    marginBottom: 10,
   },
   sectionHint: {
-    color: '#94A3B8',
+    color: '#64748B',
     fontSize: 12,
-    marginTop: 8,
+    fontFamily: 'SpaceGrotesk_400Regular',
+    marginBottom: 12,
+  },
+  sessionControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  sessionButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.35)',
+  },
+  sessionButtonPressed: {
+    transform: [{ scale: 0.95 }],
+  },
+  sessionButtonDisabled: {
+    opacity: 0.4,
+  },
+  sessionValue: {
+    color: '#0F172A',
+    fontSize: 14,
+    fontFamily: 'SpaceGrotesk_600SemiBold',
+  },
+  selectedCard: {
+    padding: 16,
+    borderRadius: 18,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.2)',
+  },
+  selectedName: {
+    color: '#0F172A',
+    fontSize: 16,
+    fontFamily: 'SpaceGrotesk_600SemiBold',
+  },
+  selectedMeta: {
+    color: '#64748B',
+    fontSize: 12,
+    fontFamily: 'SpaceGrotesk_400Regular',
+    marginTop: 6,
+  },
+  personaCard: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.3)',
+    marginBottom: 12,
+  },
+  personaCardActive: {
+    borderColor: '#38BDF8',
+    backgroundColor: 'rgba(56, 189, 248, 0.12)',
+  },
+  personaName: {
+    color: '#0F172A',
+    fontSize: 15,
+    fontFamily: 'SpaceGrotesk_600SemiBold',
+  },
+  personaNameActive: {
+    color: '#0F172A',
+  },
+  personaMeta: {
+    color: '#64748B',
+    fontSize: 12,
+    fontFamily: 'SpaceGrotesk_400Regular',
+    marginTop: 6,
+  },
+  deleteButton: {
+    padding: 8,
+  },
+  formField: {
     marginBottom: 16,
+  },
+  inputLabel: {
+    color: '#0F172A',
+    fontSize: 12,
+    fontFamily: 'SpaceGrotesk_600SemiBold',
+    textTransform: 'uppercase',
+    letterSpacing: 1.2,
+    marginBottom: 6,
+  },
+  input: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: '#0F172A',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.25)',
     fontFamily: 'SpaceGrotesk_400Regular',
   },
-  list: {
-    paddingBottom: 30,
-    gap: 12,
+  relationshipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  relationshipChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.35)',
+    backgroundColor: '#FFFFFF',
+  },
+  relationshipChipActive: {
+    backgroundColor: 'rgba(56, 189, 248, 0.2)',
+    borderColor: '#38BDF8',
+  },
+  relationshipText: {
+    color: '#334155',
+    fontSize: 12,
+    fontFamily: 'SpaceGrotesk_500Medium',
+  },
+  relationshipTextActive: {
+    color: '#0F172A',
+  },
+  error: {
+    color: '#DC2626',
+    fontSize: 12,
+    fontFamily: 'SpaceGrotesk_400Regular',
+    marginBottom: 10,
+  },
+  addButton: {
+    backgroundColor: '#0F172A',
+    paddingVertical: 14,
+    borderRadius: 999,
+    alignItems: 'center',
+  },
+  addButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    fontFamily: 'SpaceGrotesk_600SemiBold',
   },
   voiceCard: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 16,
+    padding: 14,
     borderRadius: 16,
-    backgroundColor: 'rgba(30, 41, 59, 0.7)',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.2)',
+    borderColor: 'rgba(148, 163, 184, 0.3)',
+    marginBottom: 12,
   },
   voiceCardActive: {
     borderColor: '#F97316',
-    backgroundColor: 'rgba(249, 115, 22, 0.15)',
+    backgroundColor: 'rgba(249, 115, 22, 0.12)',
   },
   voiceLabel: {
-    color: '#E2E8F0',
-    fontSize: 15,
+    color: '#0F172A',
+    fontSize: 14,
     fontFamily: 'SpaceGrotesk_600SemiBold',
   },
   voiceLabelActive: {
-    color: '#FDE68A',
+    color: '#0F172A',
   },
   voiceMeta: {
     marginTop: 6,
-    color: '#94A3B8',
+    color: '#64748B',
     fontSize: 12,
     fontFamily: 'SpaceGrotesk_400Regular',
   },
   logoutButton: {
-    marginTop: 12,
+    marginTop: 8,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -146,11 +482,11 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: 'rgba(248, 113, 113, 0.6)',
-    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    borderColor: 'rgba(220, 38, 38, 0.4)',
+    backgroundColor: 'rgba(220, 38, 38, 0.08)',
   },
   logoutText: {
-    color: '#F8FAFC',
+    color: '#DC2626',
     fontSize: 12,
     fontFamily: 'SpaceGrotesk_600SemiBold',
     textTransform: 'uppercase',
