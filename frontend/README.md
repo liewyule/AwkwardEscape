@@ -32,7 +32,7 @@ npm install groq-sdk @supabase/supabase-js
 
 ## Environment variables
 
-Create a `.env` file at `mobile/.env`:
+Create a `.env` file at `frontend/.env`:
 
 ```bash
 EXPO_PUBLIC_GROQ_API_KEY=your_groq_key
