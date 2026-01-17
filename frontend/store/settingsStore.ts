@@ -7,8 +7,10 @@ import type { CallMode } from '@/types/call';
 type SettingsState = {
   mode: CallMode;
   personaId: string;
+  voiceId: string;
   setMode: (mode: CallMode) => void;
   setPersonaId: (personaId: string) => void;
+  setVoiceId: (voiceId: string) => void;
 };
 
 export const useSettingsStore = create<SettingsState>()(
@@ -16,8 +18,10 @@ export const useSettingsStore = create<SettingsState>()(
     (set) => ({
       mode: 'call',
       personaId: 'panicked-roommate',
+      voiceId: 'en-US-Standard-B',
       setMode: (mode) => set({ mode }),
       setPersonaId: (personaId) => set({ personaId }),
+      setVoiceId: (voiceId) => set({ voiceId }),
     }),
     {
       name: 'awkwardescape-settings',

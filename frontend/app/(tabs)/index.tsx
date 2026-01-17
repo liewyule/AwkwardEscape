@@ -1,20 +1,37 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Pressable,
-  StyleSheet,
-  Switch,
-  Text,
-  View,
-} from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 import { PERSONAS } from '@/constants/personas';
 import { useCallStore } from '@/features/callLogic';
 import { scheduleFakeMessage } from '@/services/notificationEngine';
 import { useSettingsStore } from '@/store/settingsStore';
+import { useSilenceTrigger } from '@/components/useSilenceTrigger';
 
 const COUNTDOWN_SECONDS = 5;
+
+function SilenceTriggerListener({ onSilence }: { onSilence: () => void }) {
+  const { meterDb, silenceElapsedMs, silenceMs, silenceDbThreshold } = useSilenceTrigger({
+    onSilence,
+    silenceMs: 5000,
+  });
+  const elapsedSeconds = (silenceElapsedMs / 1000).toFixed(1);
+  const targetSeconds = (silenceMs / 1000).toFixed(1);
+  const meterLabel = meterDb === null ? '—' : `${meterDb.toFixed(0)} dB`;
+
+  return (
+    <View style={styles.silenceStatus}>
+      <Text style={styles.silenceText}>
+        Silence: {elapsedSeconds}s / {targetSeconds}s
+      </Text>
+      <Text style={styles.silenceText}>
+        Level: {meterLabel} (trigger below {silenceDbThreshold} dB)
+      </Text>
+    </View>
+  );
+}
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -22,12 +39,20 @@ export default function HomeScreen() {
   const { mode, setMode, personaId, setPersonaId } = useSettingsStore();
   const [countdown, setCountdownState] = useState(0);
   const [messageQueued, setMessageQueued] = useState(false);
+  const [silenceEnabled, setSilenceEnabled] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const countdownRef = useRef(0);
 
   const selectedPersona = useMemo(
     () => PERSONAS.find((item) => item.id === personaId) ?? PERSONAS[0],
     [personaId]
   );
+
+  const handleSilenceTrigger = useCallback(() => {
+    startRinging(selectedPersona.id).then(() => {
+      router.push('/call/incoming');
+    });
+  }, [router, selectedPersona.id, startRinging]);
 
   useEffect(() => {
     return () => {
@@ -44,36 +69,35 @@ export default function HomeScreen() {
 
     setCountdownState(COUNTDOWN_SECONDS);
     setCountdown(COUNTDOWN_SECONDS);
+    countdownRef.current = COUNTDOWN_SECONDS;
 
     timerRef.current = setInterval(async () => {
-      setCountdownState((prev) => {
-        const next = prev - 1;
-        setCountdown(next);
+      countdownRef.current -= 1;
+      const next = countdownRef.current;
+      setCountdownState(next);
+      setCountdown(next);
 
-        if (next <= 0) {
-          if (timerRef.current) {
-            clearInterval(timerRef.current);
-          }
-          timerRef.current = null;
+      if (next <= 0) {
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+        }
+        timerRef.current = null;
+        countdownRef.current = 0;
 
-          if (mode === 'message') {
-            scheduleFakeMessage(
-              selectedPersona.name,
-              'Urgent: can you step out for a minute? I need to talk.'
-            );
-            setMessageQueued(true);
-            setTimeout(() => setMessageQueued(false), 2000);
-            return 0;
-          }
-
-          startRinging(selectedPersona.id).then(() => {
-            router.push('/incoming-call');
-          });
-          return 0;
+        if (mode === 'message') {
+          scheduleFakeMessage(
+            selectedPersona.name,
+            'Urgent: can you step out for a minute? I need to talk.'
+          );
+          setMessageQueued(true);
+          setTimeout(() => setMessageQueued(false), 2000);
+          return;
         }
 
-        return next;
-      });
+        startRinging(selectedPersona.id).then(() => {
+          router.push('/incoming-call');
+        });
+      }
     }, 1000);
   };
 
@@ -84,6 +108,7 @@ export default function HomeScreen() {
     timerRef.current = null;
     setCountdownState(0);
     setCountdown(0);
+    countdownRef.current = 0;
   };
 
   return (
@@ -94,8 +119,13 @@ export default function HomeScreen() {
       />
       <View style={styles.glow} />
       <View style={styles.header}>
-        <Text style={styles.title}>AwkwardEscape</Text>
-        <Text style={styles.subtitle}>Social Emergency Exit</Text>
+        <View>
+          <Text style={styles.title}>AwkwardEscape</Text>
+          <Text style={styles.subtitle}>Social Emergency Exit</Text>
+        </View>
+        <Pressable onPress={() => router.push('/settings')} style={styles.settingsButton}>
+          <Ionicons name="settings-outline" size={22} color="#E2E8F0" />
+        </Pressable>
       </View>
 
       <View style={styles.panel}>
@@ -110,6 +140,21 @@ export default function HomeScreen() {
           />
           <Text style={styles.modeText}>Loud (Call)</Text>
         </View>
+      </View>
+
+      <View style={styles.panel}>
+        <Text style={styles.panelLabel}>Silence Trigger</Text>
+        <View style={styles.toggleRow}>
+          <Text style={styles.modeText}>Standby off</Text>
+          <Switch
+            value={silenceEnabled}
+            onValueChange={setSilenceEnabled}
+            trackColor={{ false: '#2B394A', true: '#22C55E' }}
+            thumbColor={silenceEnabled ? '#DCFCE7' : '#E2E8F0'}
+          />
+          <Text style={styles.modeText}>Standby on</Text>
+        </View>
+        {silenceEnabled && <SilenceTriggerListener onSilence={handleSilenceTrigger} />}
       </View>
 
       <View style={styles.personaPanel}>
@@ -160,6 +205,7 @@ export default function HomeScreen() {
       {messageQueued && (
         <Text style={styles.armedNote}>Fake message scheduled.</Text>
       )}
+
     </View>
   );
 }
@@ -184,6 +230,9 @@ const styles = StyleSheet.create({
   },
   header: {
     marginBottom: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   title: {
     color: '#F8FAFC',
@@ -198,6 +247,16 @@ const styles = StyleSheet.create({
     fontFamily: 'SpaceGrotesk_400Regular',
     textTransform: 'uppercase',
     letterSpacing: 1.4,
+  },
+  settingsButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.3)',
   },
   panel: {
     backgroundColor: 'rgba(15, 23, 42, 0.7)',
@@ -328,6 +387,17 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     textAlign: 'center',
     marginTop: 12,
+    fontFamily: 'SpaceGrotesk_400Regular',
+  },
+  silenceStatus: {
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(148, 163, 184, 0.2)',
+  },
+  silenceText: {
+    color: '#CBD5F5',
+    fontSize: 12,
     fontFamily: 'SpaceGrotesk_400Regular',
   },
 });

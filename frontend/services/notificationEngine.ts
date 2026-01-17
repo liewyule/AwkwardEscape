@@ -1,14 +1,36 @@
-import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: false,
-    shouldSetBadge: false,
-  }),
-});
+const isExpoGo = Constants.appOwnership === 'expo';
 
-export async function ensureNotificationPermissions() {
+const getNotifications = async () => {
+  if (isExpoGo) {
+    return null;
+  }
+  const module = await import('expo-notifications');
+  return module;
+};
+
+const ensureHandler = async () => {
+  const Notifications = await getNotifications();
+  if (!Notifications) {
+    return null;
+  }
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: false,
+      shouldSetBadge: false,
+    }),
+  });
+  return Notifications;
+};
+
+export async function ensureNotificationPermissions(
+  Notifications: Awaited<ReturnType<typeof getNotifications>>
+) {
+  if (!Notifications) {
+    return false;
+  }
   const existing = await Notifications.getPermissionsAsync();
   if (existing.granted) {
     return true;
@@ -22,7 +44,12 @@ export async function scheduleFakeMessage(
   body: string,
   delaySeconds = 2
 ) {
-  const granted = await ensureNotificationPermissions();
+  const Notifications = await ensureHandler();
+  if (!Notifications) {
+    return;
+  }
+
+  const granted = await ensureNotificationPermissions(Notifications);
   if (!granted) {
     return;
   }
