@@ -43,6 +43,7 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="persona" options={{ headerShown: false }} />
         <Stack.Screen name="mode" options={{ headerShown: false }} />
+        <Stack.Screen name="voices" options={{ headerShown: false }} />
         <Stack.Screen
           name="incoming-call"
           options={{ presentation: 'fullScreenModal', headerShown: false }}
