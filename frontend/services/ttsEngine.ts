@@ -1,5 +1,4 @@
 import { Audio } from 'expo-av';
-import * as Speech from 'expo-speech';
 
 import type { ScriptTurn } from '@/types/call';
 import type { VoiceOption } from '@/constants/voices';
@@ -98,20 +97,12 @@ const speakLine = async (text: string, voice?: VoiceOption) => {
     return;
   }
 
-  await new Promise<void>((resolve) => {
-    Speech.speak(text, {
-      rate: 0.95,
-      pitch: 1.0,
-      onDone: () => resolve(),
-      onStopped: () => resolve(),
-      onError: () => resolve(),
-    });
-  });
+  console.warn('Google TTS unavailable. Check EXPO_PUBLIC_GCP_TTS_API_KEY.');
+  await new Promise((resolve) => setTimeout(resolve, estimateDurationMs(text)));
 };
 
 export const stopTTS = () => {
   isCancelled = true;
-  Speech.stop();
   stopSound();
 };
 

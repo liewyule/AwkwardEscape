@@ -233,6 +233,16 @@ export default function HomeScreen() {
               <Text style={styles.menuText}>Modes</Text>
               <Ionicons name="chevron-forward" size={18} color="#0F172A" />
             </Pressable>
+
+            <Pressable
+              style={styles.menuItem}
+              onPress={() => {
+                setMenuVisible(false);
+                router.push('/voices');
+              }}>
+              <Text style={styles.menuText}>Voices</Text>
+              <Ionicons name="chevron-forward" size={18} color="#0F172A" />
+            </Pressable>
           </Pressable>
         </Pressable>
       </Modal>
