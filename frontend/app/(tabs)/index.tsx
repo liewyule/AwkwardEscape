@@ -49,7 +49,6 @@ export default function HomeScreen() {
   const holdCompletedRef = useRef(false);
   const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const voiceGuardActiveRef = useRef(false);
-  const autoStartRef = useRef(false);
 
   const selectedPersona = useMemo(
     () => personas.find((persona) => persona.id === selectedPersonaId) ?? personas[0],
@@ -223,11 +222,6 @@ export default function HomeScreen() {
     endVoiceGuardSession({ message: 'Session ended.' });
   }, [endVoiceGuardSession]);
 
-  useEffect(() => {
-    if (autoStartRef.current) return;
-    autoStartRef.current = true;
-    void handleStartSession();
-  }, [handleStartSession]);
 
   const beginHold = useCallback(() => {
     if (isCallProcessing || isHolding) return;
