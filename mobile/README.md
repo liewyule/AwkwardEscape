@@ -1,8 +1,8 @@
-# AwkwardEscape
+# AwkwardEscape (Expo + Expo Router)
 
-AwkwardEscape is a "Social Emergency Exit" mobile app that simulates incoming calls and texts with believable scripts. It helps you step away from a situation with a realistic incoming call flow, an active call screen, and a teleprompter.
+AwkwardEscape is a "Social Emergency Exit" app that simulates incoming calls and texts with believable scripts. It helps you step away from a situation with a realistic incoming call flow, an active call screen, and a teleprompter.
 
-## App highlights
+## App details
 
 - Hold-to-escape home flow with a 2-second press-and-hold
 - Persona manager (add/select/delete) with per-persona voice selection
@@ -27,11 +27,7 @@ cd mobile
 npm install
 ```
 
-2. Create `mobile/.env` and add the environment variables you need (see below).
-
-## Environment variables
-
-Required for auth:
+2. Create a `.env` file at `mobile/.env` and add the environment variables you need:
 
 ```bash
 EXPO_PUBLIC_SUPABASE_URL=your_supabase_project_url
@@ -40,15 +36,9 @@ EXPO_PUBLIC_GROQ_API_KEY=your_groq_key
 EXPO_PUBLIC_GCP_TTS_API_KEY=your_google_cloud_tts_key
 ```
 
-Notes:
-
-- If `EXPO_PUBLIC_GROQ_API_KEY` is missing, scripts fall back to offline templates.
-- If `EXPO_PUBLIC_GCP_TTS_API_KEY` is missing, caller audio is silent (teleprompter still works).
-
-## Run the app
+3. Start the app:
 
 ```bash
-cd mobile
 npx expo start
 ```
 
@@ -72,12 +62,18 @@ Open with:
 
 ## Project structure (key files)
 
-- `mobile/app/(tabs)/index.tsx` Home screen and session controls
-- `mobile/app/settings.tsx` Settings (personas, session, silence tuning)
-- `mobile/app/incoming-call.tsx` Incoming call UI
-- `mobile/app/active-call.tsx` Active call UI + teleprompter
-- `mobile/components/call/Teleprompter.tsx` Teleprompter with per-line progress
-- `mobile/features/callLogic.ts` Call state, ringtone, mic handling
-- `mobile/services/scriptEngine.ts` Script generation + offline templates
-- `mobile/services/ttsEngine.ts` Google TTS playback
-- `mobile/store/settingsStore.ts` Persisted settings and personas
+- `app/(tabs)/index.tsx` Home screen and session controls
+- `app/settings.tsx` Settings (personas, session, silence tuning)
+- `app/incoming-call.tsx` Incoming call UI
+- `app/active-call.tsx` Active call UI + teleprompter
+- `components/call/Teleprompter.tsx` Teleprompter with per-line progress
+- `features/callLogic.ts` Call state, ringtone, mic handling
+- `services/scriptEngine.ts` Script generation + offline templates
+- `services/ttsEngine.ts` Google TTS playback
+- `store/settingsStore.ts` Persisted settings and personas
+
+## Notes
+
+- Scripts fall back to offline templates if Groq is not configured.
+- Google TTS requires `EXPO_PUBLIC_GCP_TTS_API_KEY`. Without it, caller audio will be silent.
+- Settings persist locally via AsyncStorage.
