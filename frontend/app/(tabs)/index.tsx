@@ -8,11 +8,10 @@ import { StatusBar } from 'expo-status-bar';
 
 import { useSilenceTrigger } from '@/components/useSilenceTrigger';
 import { useCallStore } from '@/features/callLogic';
+import { supabase } from '@/services/supabaseClient';
 import { useSettingsStore } from '@/store/settingsStore';
 
 const HOLD_DURATION_MS = 2000;
-const VOICE_GUARD_SILENCE_MS = 7000;
-const VOICE_GUARD_DB_THRESHOLD = -40;
 const VOICE_GUARD_SAMPLE_MS = 200;
 const VOICE_GUARD_TIMER_TICK_MS = 250;
 
@@ -26,7 +25,13 @@ const formatCountdown = (durationMs: number) => {
 export default function HomeScreen() {
   const router = useRouter();
   const { startRinging } = useCallStore();
-  const { personas, selectedPersonaId, voiceGuardWindowMinutes } = useSettingsStore();
+  const {
+    personas,
+    selectedPersonaId,
+    voiceGuardWindowMinutes,
+    voiceGuardSilenceMs,
+    voiceGuardDbThreshold,
+  } = useSettingsStore();
 
   const [menuVisible, setMenuVisible] = useState(false);
   const [statusNote, setStatusNote] = useState<string | null>(null);
@@ -107,8 +112,8 @@ export default function HomeScreen() {
 
   const { meterDb, silenceElapsedMs } = useSilenceTrigger({
     enabled: voiceGuardActive,
-    silenceDbThreshold: VOICE_GUARD_DB_THRESHOLD,
-    silenceMs: VOICE_GUARD_SILENCE_MS,
+    silenceDbThreshold: voiceGuardDbThreshold,
+    silenceMs: voiceGuardSilenceMs,
     sampleEveryMs: VOICE_GUARD_SAMPLE_MS,
     onSilence: handleVoiceGuardSilence,
   });
@@ -154,6 +159,7 @@ export default function HomeScreen() {
       if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
     };
   }, []);
+
 
   const resetProgress = useCallback(() => {
     Animated.timing(progress, {
@@ -216,6 +222,7 @@ export default function HomeScreen() {
     endVoiceGuardSession({ message: 'Session ended.' });
   }, [endVoiceGuardSession]);
 
+
   const beginHold = useCallback(() => {
     if (isCallProcessing || isHolding) return;
 
@@ -250,11 +257,11 @@ export default function HomeScreen() {
 
   const progressWidth = progress.interpolate({
     inputRange: [0, 1],
-    outputRange: [0, 220],
+    outputRange: [0, 270],
   });
   const silenceRemainingMs = voiceGuardActive
-    ? Math.max(VOICE_GUARD_SILENCE_MS - silenceElapsedMs, 0)
-    : VOICE_GUARD_SILENCE_MS;
+    ? Math.max(voiceGuardSilenceMs - silenceElapsedMs, 0)
+    : voiceGuardSilenceMs;
   const sessionRemainingMs = voiceGuardActive
     ? Math.max(sessionTotalMs - sessionElapsedMs, 0)
     : voiceGuardWindowMs;
@@ -262,16 +269,23 @@ export default function HomeScreen() {
     voiceGuardActive && meterDb !== null ? `${Math.round(meterDb)} dB` : '-- dB';
   const buttonLabel = isCallProcessing ? 'Calling...' : 'Instant Call';
   const buttonHint = isHolding ? 'Keep holding...' : 'Hold for 2 seconds';
-  const startSessionLabel = isSessionProcessing
-    ? 'Starting...'
+  const sessionLabel = isSessionProcessing
+    ? voiceGuardActive
+      ? 'Stopping...'
+      : 'Starting...'
     : voiceGuardActive
       ? 'Session Active'
       : 'Start Session';
-  const endSessionLabel = isSessionProcessing ? 'Stopping...' : 'End Session';
-  const startSessionDisabled =
-    voiceGuardActive || isSessionProcessing || isCallProcessing;
-  const endSessionDisabled =
-    !voiceGuardActive || isSessionProcessing || isCallProcessing;
+  const sessionDisabled = isSessionProcessing || isCallProcessing;
+  const sessionTimeLabel = formatCountdown(
+    voiceGuardActive ? sessionRemainingMs : voiceGuardWindowMs
+  );
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setMenuVisible(false);
+    router.replace('/login');
+  };
 
   return (
     <View style={styles.container}>
@@ -298,30 +312,7 @@ export default function HomeScreen() {
       </View>
 
       <View style={styles.centerContent}>
-        <View style={styles.sessionControls}>
-          <Pressable
-            onPress={handleStartSession}
-            disabled={startSessionDisabled}
-            style={({ pressed }) => [
-              styles.sessionButton,
-              styles.sessionButtonPrimary,
-              pressed && !startSessionDisabled && styles.sessionButtonPressed,
-              startSessionDisabled && styles.sessionButtonDisabled,
-            ]}>
-            <Text style={styles.sessionButtonText}>{startSessionLabel}</Text>
-          </Pressable>
-          <Pressable
-            onPress={handleEndSession}
-            disabled={endSessionDisabled}
-            style={({ pressed }) => [
-              styles.sessionButton,
-              styles.sessionButtonSecondary,
-              pressed && !endSessionDisabled && styles.sessionButtonPressed,
-              endSessionDisabled && styles.sessionButtonDisabled,
-            ]}>
-            <Text style={styles.sessionButtonTextSecondary}>{endSessionLabel}</Text>
-          </Pressable>
-        </View>
+
 
         <Pressable
           onPressIn={beginHold}
@@ -338,7 +329,7 @@ export default function HomeScreen() {
               {
                 height: progress.interpolate({
                   inputRange: [0, 1],
-                  outputRange: [0, 220],
+                  outputRange: [0, 270],
                 }),
               },
             ]}
@@ -350,6 +341,35 @@ export default function HomeScreen() {
         <View style={styles.progressTrack}>
           <Animated.View style={[styles.progressFill, { width: progressWidth }]} />
         </View>
+        <View style={styles.sessionControls}>
+          <Pressable
+            onPress={voiceGuardActive ? handleEndSession : handleStartSession}
+            disabled={sessionDisabled}
+            style={({ pressed }) => [
+              styles.sessionButton,
+              voiceGuardActive ? styles.sessionButtonActive : styles.sessionButtonPrimary,
+              pressed && !sessionDisabled && styles.sessionButtonPressed,
+              sessionDisabled && styles.sessionButtonDisabled,
+            ]}>
+            <View style={styles.sessionButtonContent}>
+              <Text style={styles.sessionButtonText}>{sessionLabel}</Text>
+              <View style={styles.sessionTimerPill}>
+                <Ionicons
+                  name="time-outline"
+                  size={14}
+                  color={voiceGuardActive ? '#F8FAFC' : '#0F172A'}
+                />
+                <Text
+                  style={[
+                    styles.sessionTimerText,
+                    voiceGuardActive && styles.sessionTimerTextActive,
+                  ]}>
+                  {sessionTimeLabel}
+                </Text>
+              </View>
+            </View>
+          </Pressable>
+        </View>
 
         <View style={styles.voiceGuardPanel}>
           <View style={styles.voiceGuardRow}>
@@ -357,16 +377,6 @@ export default function HomeScreen() {
             <Text style={styles.voiceGuardValue}>
               {formatCountdown(silenceRemainingMs)}
             </Text>
-          </View>
-          <View style={styles.voiceGuardRow}>
-            <Text style={styles.voiceGuardLabel}>Session window</Text>
-            <Text style={styles.voiceGuardValue}>
-              {formatCountdown(sessionRemainingMs)}
-            </Text>
-          </View>
-          <View style={styles.voiceGuardRow}>
-            <Text style={styles.voiceGuardLabel}>Mic level</Text>
-            <Text style={styles.voiceGuardValue}>{meterLabel}</Text>
           </View>
         </View>
 
@@ -395,16 +405,11 @@ export default function HomeScreen() {
               <Text style={styles.menuText}>Settings</Text>
               <Ionicons name="chevron-forward" size={18} color="#0F172A" />
             </Pressable>
-
-            <Pressable
-              style={styles.menuItem}
-              onPress={() => {
-                setMenuVisible(false);
-                router.push('/voices');
-              }}>
-              <Text style={styles.menuText}>Voices</Text>
-              <Ionicons name="chevron-forward" size={18} color="#0F172A" />
+            <Pressable style={styles.menuItem} onPress={handleLogout}>
+              <Text style={[styles.menuText, styles.menuTextDanger]}>Log out</Text>
+              <Ionicons name="log-out-outline" size={18} color="#DC2626" />
             </Pressable>
+
           </Pressable>
         </Pressable>
       </Modal>
@@ -482,15 +487,19 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 18,
+    gap: 22,
   },
   sessionControls: {
     width: '100%',
     maxWidth: 320,
-    gap: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 28,
   },
   sessionButton: {
-    paddingVertical: 12,
+    flex: 1,
+    paddingVertical: 16,
     borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
@@ -500,9 +509,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#0F172A',
     borderColor: '#0F172A',
   },
-  sessionButtonSecondary: {
-    backgroundColor: '#FFFFFF',
-    borderColor: 'rgba(15, 23, 42, 0.2)',
+  sessionButtonActive: {
+    backgroundColor: '#22C55E',
+    borderColor: '#22C55E',
   },
   sessionButtonPressed: {
     transform: [{ scale: 0.98 }],
@@ -512,22 +521,47 @@ const styles = StyleSheet.create({
   },
   sessionButtonText: {
     color: '#F8FAFC',
-    fontSize: 12,
+    fontSize: 13,
     textTransform: 'uppercase',
     letterSpacing: 1,
     fontFamily: 'SpaceGrotesk_600SemiBold',
+    textAlign: 'center',
+    flex: 1,
+    marginLeft: -40,
   },
-  sessionButtonTextSecondary: {
+  sessionButtonContent: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    position: 'relative',
+  },
+  sessionTimerPill: {
+    position: 'absolute',
+    right: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    borderWidth: 1,
+    borderColor: 'rgba(15, 23, 42, 0.15)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  sessionTimerText: {
     color: '#0F172A',
     fontSize: 12,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
     fontFamily: 'SpaceGrotesk_600SemiBold',
   },
+  sessionTimerTextActive: {
+    color: '#0F172A',
+  },
   panicButton: {
-    width: 220,
-    height: 220,
-    borderRadius: 120,
+    width: 270,
+    height: 270,
+    borderRadius: 150,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#F8FAFC',
@@ -537,6 +571,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 18,
     overflow: 'hidden',
+    marginTop: 8,
   },
   panicFill: {
     position: 'absolute',
@@ -557,7 +592,7 @@ const styles = StyleSheet.create({
     fontFamily: 'SpaceGrotesk_400Regular',
   },
   progressTrack: {
-    width: 220,
+    width: 270,
     height: 6,
     borderRadius: 999,
     backgroundColor: 'rgba(148, 163, 184, 0.25)',
@@ -570,6 +605,7 @@ const styles = StyleSheet.create({
   voiceGuardPanel: {
     width: '100%',
     maxWidth: 320,
+    marginTop: 16,
     paddingVertical: 12,
     paddingHorizontal: 14,
     borderRadius: 16,
@@ -638,5 +674,8 @@ const styles = StyleSheet.create({
     color: '#0F172A',
     fontSize: 14,
     fontFamily: 'SpaceGrotesk_500Medium',
+  },
+  menuTextDanger: {
+    color: '#DC2626',
   },
 });

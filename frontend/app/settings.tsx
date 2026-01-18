@@ -9,12 +9,17 @@ import {
   type RelationshipType,
 } from '@/constants/personas';
 import { VOICES } from '@/constants/voices';
-import { supabase } from '@/services/supabaseClient';
 import { useSettingsStore } from '@/store/settingsStore';
 
 const SESSION_MINUTES_MIN = 5;
 const SESSION_MINUTES_MAX = 120;
 const SESSION_MINUTES_STEP = 5;
+const SILENCE_SECONDS_MIN = 3;
+const SILENCE_SECONDS_MAX = 20;
+const SILENCE_SECONDS_STEP = 1;
+const THRESHOLD_MIN_DB = -80;
+const THRESHOLD_MAX_DB = -10;
+const THRESHOLD_STEP_DB = 2;
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -24,27 +29,58 @@ export default function SettingsScreen() {
     selectPersona,
     addPersona,
     deletePersona,
+    setPersonaVoice,
     voiceId,
     setVoiceId,
     voiceGuardWindowMinutes,
     setVoiceGuardWindowMinutes,
+    voiceGuardSilenceMs,
+    setVoiceGuardSilenceMs,
+    voiceGuardDbThreshold,
+    setVoiceGuardDbThreshold,
   } = useSettingsStore();
 
   const [displayName, setDisplayName] = useState('');
   const [relationshipType, setRelationshipType] = useState<RelationshipType>('friend');
   const [defaultTheme, setDefaultTheme] = useState('');
+  const [newPersonaVoiceId, setNewPersonaVoiceId] = useState(voiceId);
   const [error, setError] = useState<string | null>(null);
 
   const selectedPersona = useMemo(
     () => personas.find((persona) => persona.id === selectedPersonaId),
     [personas, selectedPersonaId]
   );
+  const voiceLabelById = useMemo(
+    () =>
+      VOICES.reduce<Record<string, string>>((acc, voice) => {
+        acc[voice.id] = voice.label;
+        return acc;
+      }, {}),
+    []
+  );
+
+  const cyclePersonaVoice = (personaId: string, currentId?: string) => {
+    const currentIndex = VOICES.findIndex((voice) => voice.id === currentId);
+    const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % VOICES.length;
+    setPersonaVoice(personaId, VOICES[nextIndex].id);
+  };
 
   const clampMinutes = (value: number) =>
     Math.min(SESSION_MINUTES_MAX, Math.max(SESSION_MINUTES_MIN, value));
 
   const updateSessionMinutes = (delta: number) => {
     setVoiceGuardWindowMinutes(clampMinutes(voiceGuardWindowMinutes + delta));
+  };
+  const clampSilenceSeconds = (value: number) =>
+    Math.min(SILENCE_SECONDS_MAX, Math.max(SILENCE_SECONDS_MIN, value));
+  const updateSilenceSeconds = (delta: number) => {
+    const nextSeconds = clampSilenceSeconds(voiceGuardSilenceMs / 1000 + delta);
+    setVoiceGuardSilenceMs(nextSeconds * 1000);
+  };
+  const clampThreshold = (value: number) =>
+    Math.min(THRESHOLD_MAX_DB, Math.max(THRESHOLD_MIN_DB, value));
+  const updateThreshold = (delta: number) => {
+    setVoiceGuardDbThreshold(clampThreshold(voiceGuardDbThreshold + delta));
   };
 
   const handleAdd = () => {
@@ -57,17 +93,14 @@ export default function SettingsScreen() {
       displayName,
       relationshipType,
       defaultTheme: defaultTheme.trim() || undefined,
+      voiceId: newPersonaVoiceId,
     });
 
     setDisplayName('');
     setRelationshipType('friend');
     setDefaultTheme('');
+    setNewPersonaVoiceId(voiceId);
     setError(null);
-  };
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    router.replace('/login');
   };
 
   return (
@@ -83,10 +116,11 @@ export default function SettingsScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
+        <View style={styles.sectionCard}>
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Session</Text>
           <Text style={styles.sectionHint}>
-            Set how long Start Session listens for 7-second silence.
+            Set how long Start Session listens for silence before calling.
           </Text>
           <View style={styles.sessionControls}>
             <Pressable
@@ -114,21 +148,79 @@ export default function SettingsScreen() {
             </Pressable>
           </View>
         </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Selected Persona</Text>
-          <View style={styles.selectedCard}>
-            <Text style={styles.selectedName}>
-              {selectedPersona?.displayName ?? 'None'}
-            </Text>
-            <Text style={styles.selectedMeta}>
-              {selectedPersona
-                ? `${RELATIONSHIP_LABELS[selectedPersona.relationshipType]}`
-                : 'Select a persona below'}
-            </Text>
-          </View>
         </View>
 
+        <View style={styles.sectionCard}>
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Silence Detection</Text>
+          <Text style={styles.sectionHint}>
+            Tune how long and how quiet it must be before the call starts.
+          </Text>
+          <View style={styles.settingRow}>
+            <Text style={styles.settingLabel}>Silence window</Text>
+            <View style={styles.sessionControls}>
+              <Pressable
+                onPress={() => updateSilenceSeconds(-SILENCE_SECONDS_STEP)}
+                disabled={voiceGuardSilenceMs / 1000 <= SILENCE_SECONDS_MIN}
+                style={({ pressed }) => [
+                  styles.sessionButton,
+                  styles.sessionButtonSecondary,
+                  pressed && styles.sessionButtonPressed,
+                  voiceGuardSilenceMs / 1000 <= SILENCE_SECONDS_MIN &&
+                    styles.sessionButtonDisabled,
+                ]}>
+                <Ionicons name="remove" size={16} color="#0F172A" />
+              </Pressable>
+              <Text style={styles.sessionValue}>{voiceGuardSilenceMs / 1000}s</Text>
+              <Pressable
+                onPress={() => updateSilenceSeconds(SILENCE_SECONDS_STEP)}
+                disabled={voiceGuardSilenceMs / 1000 >= SILENCE_SECONDS_MAX}
+                style={({ pressed }) => [
+                  styles.sessionButton,
+                  styles.sessionButtonSecondary,
+                  pressed && styles.sessionButtonPressed,
+                  voiceGuardSilenceMs / 1000 >= SILENCE_SECONDS_MAX &&
+                    styles.sessionButtonDisabled,
+                ]}>
+                <Ionicons name="add" size={16} color="#0F172A" />
+              </Pressable>
+            </View>
+          </View>
+
+          <View style={styles.settingRow}>
+            <Text style={styles.settingLabel}>Mic threshold</Text>
+            <View style={styles.sessionControls}>
+              <Pressable
+                onPress={() => updateThreshold(-THRESHOLD_STEP_DB)}
+                disabled={voiceGuardDbThreshold <= THRESHOLD_MIN_DB}
+                style={({ pressed }) => [
+                  styles.sessionButton,
+                  styles.sessionButtonSecondary,
+                  pressed && styles.sessionButtonPressed,
+                  voiceGuardDbThreshold <= THRESHOLD_MIN_DB &&
+                    styles.sessionButtonDisabled,
+                ]}>
+                <Ionicons name="remove" size={16} color="#0F172A" />
+              </Pressable>
+              <Text style={styles.sessionValue}>{voiceGuardDbThreshold} dB</Text>
+              <Pressable
+                onPress={() => updateThreshold(THRESHOLD_STEP_DB)}
+                disabled={voiceGuardDbThreshold >= THRESHOLD_MAX_DB}
+                style={({ pressed }) => [
+                  styles.sessionButton,
+                  styles.sessionButtonSecondary,
+                  pressed && styles.sessionButtonPressed,
+                  voiceGuardDbThreshold >= THRESHOLD_MAX_DB &&
+                    styles.sessionButtonDisabled,
+                ]}>
+                <Ionicons name="add" size={16} color="#0F172A" />
+              </Pressable>
+            </View>
+          </View>
+        </View>
+        </View>
+
+        <View style={styles.sectionCard}>
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>All Personas</Text>
           {personas.map((persona) => {
@@ -146,6 +238,17 @@ export default function SettingsScreen() {
                     {RELATIONSHIP_LABELS[persona.relationshipType]}
                     {persona.defaultTheme ? ` - ${persona.defaultTheme}` : ''}
                   </Text>
+                  <View style={styles.voiceRow}>
+                    <Text style={styles.voiceBadge}>
+                      {voiceLabelById[persona.voiceId ?? voiceId] ?? 'Voice'}
+                    </Text>
+                    <Pressable
+                      onPress={() => cyclePersonaVoice(persona.id, persona.voiceId)}
+                      style={styles.voiceChangeButton}>
+                      <Ionicons name="sync" size={14} color="#0F172A" />
+                      <Text style={styles.voiceChangeText}>Change voice</Text>
+                    </Pressable>
+                  </View>
                 </View>
                 <Pressable
                   onPress={() => deletePersona(persona.id)}
@@ -156,7 +259,9 @@ export default function SettingsScreen() {
             );
           })}
         </View>
+        </View>
 
+        <View style={styles.sectionCard}>
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Add Persona</Text>
           <View style={styles.formField}>
@@ -197,6 +302,32 @@ export default function SettingsScreen() {
           </View>
 
           <View style={styles.formField}>
+            <Text style={styles.inputLabel}>Voice</Text>
+            <View style={styles.relationshipRow}>
+              {VOICES.map((voice) => {
+                const active = voice.id === newPersonaVoiceId;
+                return (
+                  <Pressable
+                    key={voice.id}
+                    onPress={() => setNewPersonaVoiceId(voice.id)}
+                    style={[
+                      styles.relationshipChip,
+                      active && styles.relationshipChipActive,
+                    ]}>
+                    <Text
+                      style={[
+                        styles.relationshipText,
+                        active && styles.relationshipTextActive,
+                      ]}>
+                      {voice.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+
+          <View style={styles.formField}>
             <Text style={styles.inputLabel}>Default Theme (optional)</Text>
             <TextInput
               value={defaultTheme}
@@ -213,35 +344,8 @@ export default function SettingsScreen() {
             <Text style={styles.addButtonText}>Add Persona</Text>
           </Pressable>
         </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Caller Voice</Text>
-          <Text style={styles.sectionHint}>
-            Select which Google Cloud TTS voice is used for the caller.
-          </Text>
-          {VOICES.map((voice) => {
-            const active = voice.id === voiceId;
-            return (
-              <Pressable
-                key={voice.id}
-                onPress={() => setVoiceId(voice.id)}
-                style={[styles.voiceCard, active && styles.voiceCardActive]}>
-                <View>
-                  <Text style={[styles.voiceLabel, active && styles.voiceLabelActive]}>
-                    {voice.label}
-                  </Text>
-                  <Text style={styles.voiceMeta}>{voice.name}</Text>
-                </View>
-                {active && <Ionicons name="checkmark-circle" size={20} color="#0F172A" />}
-              </Pressable>
-            );
-          })}
         </View>
 
-        <Pressable style={styles.logoutButton} onPress={handleLogout}>
-          <Ionicons name="log-out-outline" size={18} color="#DC2626" />
-          <Text style={styles.logoutText}>Log out</Text>
-        </Pressable>
       </ScrollView>
     </View>
   );
@@ -272,8 +376,9 @@ const styles = StyleSheet.create({
   },
   title: {
     color: '#0F172A',
-    fontSize: 24,
+    fontSize: 28,
     fontFamily: 'SpaceGrotesk_600SemiBold',
+    letterSpacing: 0.3,
   },
   subtitle: {
     color: '#64748B',
@@ -285,10 +390,21 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingBottom: 40,
+    gap: 16,
   },
-  section: {
-    marginBottom: 24,
+  sectionCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.2)',
+    shadowColor: '#94A3B8',
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 2,
   },
+  section: {},
   sectionLabel: {
     color: '#0F172A',
     fontSize: 12,
@@ -308,6 +424,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
   },
+  settingRow: {
+    gap: 8,
+    marginBottom: 12,
+  },
+  settingLabel: {
+    color: '#0F172A',
+    fontSize: 12,
+    fontFamily: 'SpaceGrotesk_600SemiBold',
+  },
   sessionButton: {
     width: 32,
     height: 32,
@@ -317,6 +442,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#F1F5F9',
     borderWidth: 1,
     borderColor: 'rgba(148, 163, 184, 0.35)',
+  },
+  sessionButtonSecondary: {
+    backgroundColor: '#FFFFFF',
   },
   sessionButtonPressed: {
     transform: [{ scale: 0.95 }],
@@ -375,6 +503,38 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'SpaceGrotesk_400Regular',
     marginTop: 6,
+  },
+  voiceRow: {
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  voiceBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(15, 23, 42, 0.08)',
+    color: '#0F172A',
+    fontSize: 11,
+    fontFamily: 'SpaceGrotesk_500Medium',
+  },
+  voiceChangeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.4)',
+    backgroundColor: '#F8FAFC',
+  },
+  voiceChangeText: {
+    color: '#0F172A',
+    fontSize: 11,
+    fontFamily: 'SpaceGrotesk_500Medium',
   },
   deleteButton: {
     padding: 8,
@@ -472,24 +632,5 @@ const styles = StyleSheet.create({
     color: '#64748B',
     fontSize: 12,
     fontFamily: 'SpaceGrotesk_400Regular',
-  },
-  logoutButton: {
-    marginTop: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 12,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: 'rgba(220, 38, 38, 0.4)',
-    backgroundColor: 'rgba(220, 38, 38, 0.08)',
-  },
-  logoutText: {
-    color: '#DC2626',
-    fontSize: 12,
-    fontFamily: 'SpaceGrotesk_600SemiBold',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
   },
 });

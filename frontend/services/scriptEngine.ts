@@ -120,6 +120,14 @@ export async function generateCallScript(
     return offlineCallScript(persona, seed);
   }
 
+  const now = new Date();
+  const timestamp =
+    Intl?.DateTimeFormat?.('en-SG', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone: 'Asia/Singapore',
+    }).format?.(now) ?? now.toISOString();
+
   try {
     const completion = await groqClient.chat.completions.create({
       model: MODEL,
@@ -127,17 +135,21 @@ export async function generateCallScript(
         {
           role: 'system',
           content:
-            'You generate short, believable phone call dialog for an urgent excuse. Output JSON only.',
+            'You generate short, believable phone call dialog for an urgent excuse. Output JSON only. Tone should be casual, Singapore English (Singlish) style, like real people talking (short, natural, slightly informal). The conversation must start with the Caller speaking first.',
         },
         {
           role: 'user',
           content: [
-            `Persona: ${persona.displayName} (${persona.relationshipType})`,
+            `Caller: ${persona.displayName} (${persona.relationshipType})`,
+            'Recipient: you',
             `Theme: ${persona.defaultTheme ?? 'something urgent'}`,
             `Mode: ${mode}`,
             `Seed: ${seed} (use it to vary wording)`,
+            `Current time: ${timestamp}`,
             'Return JSON: {"turns":[{"speaker":"Caller|You","text":"...","pauseMs":300}]}.',
             '3-5 turns, each line under 140 characters, urgent but believable.',
+            'IMPORTANT: First turn must be from "Caller".',
+            'Use Singapore English: casual particles like "lah", "leh", "lor" sparingly; avoid formal tone.',
           ].join('\n'),
         },
       ],
@@ -167,21 +179,33 @@ export async function generateMessageText(
     return offlineMessage(persona, seed);
   }
 
+  const now = new Date();
+  const timestamp =
+    Intl?.DateTimeFormat?.('en-SG', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone: 'Asia/Singapore',
+    }).format?.(now) ?? now.toISOString();
+
   try {
     const completion = await groqClient.chat.completions.create({
       model: MODEL,
       messages: [
         {
           role: 'system',
-          content: 'You generate a single urgent text message to excuse someone from a situation.',
+          content:
+            'You generate a single urgent text message to excuse someone from a situation. Tone should be casual, Singapore English (Singlish) style, like real people texting.',
         },
         {
           role: 'user',
           content: [
-            `Persona: ${persona.displayName} (${persona.relationshipType})`,
+            `Caller: ${persona.displayName} (${persona.relationshipType})`,
+            'Recipient: you',
             `Theme: ${persona.defaultTheme ?? 'something urgent'}`,
             `Seed: ${seed} (use it to vary wording)`,
+            `Current time: ${timestamp}`,
             'Return a single sentence under 180 characters.',
+            'Use Singapore English: casual, short, a bit urgent, not too formal.',
           ].join('\n'),
         },
       ],

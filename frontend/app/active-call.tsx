@@ -59,13 +59,14 @@ export default function ActiveCallScreen() {
       return;
     }
 
-    const voice = VOICES.find((item) => item.id === voiceId);
+    const activeVoiceId = persona?.voiceId ?? voiceId;
+    const voice = VOICES.find((item) => item.id === activeVoiceId);
     playScript(scriptTurns, setActiveLineIndex, voice);
 
     return () => {
       stopTTS();
     };
-  }, [status, scriptTurns, setActiveLineIndex, router, voiceId]);
+  }, [status, scriptTurns, setActiveLineIndex, router, voiceId, persona]);
 
   const handleEnd = async () => {
     stopTTS();
