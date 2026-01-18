@@ -50,8 +50,23 @@ export function useSilenceTrigger(options: SilenceTriggerOptions) {
   const triggeredRef = useRef(false);
   const startingRef = useRef(false);
   const stopPromiseRef = useRef<Promise<void> | null>(null);
+  const silenceDbRef = useRef(silenceDbThreshold);
+  const silenceMsRef = useRef(silenceMs);
+  const onSilenceRef = useRef(onSilence);
   const [meterDb, setMeterDb] = useState<number | null>(null);
   const [silenceElapsedMs, setSilenceElapsedMs] = useState(0);
+
+  useEffect(() => {
+    silenceDbRef.current = silenceDbThreshold;
+  }, [silenceDbThreshold]);
+
+  useEffect(() => {
+    silenceMsRef.current = silenceMs;
+  }, [silenceMs]);
+
+  useEffect(() => {
+    onSilenceRef.current = onSilence;
+  }, [onSilence]);
 
   useEffect(() => {
     let isActive = true;
@@ -126,7 +141,7 @@ export function useSilenceTrigger(options: SilenceTriggerOptions) {
 
         // Metering is negative dB; closer to 0 is louder.
         setMeterDb(status.metering);
-        if (status.metering < silenceDbThreshold) {
+        if (status.metering < silenceDbRef.current) {
           if (silenceStartRef.current === null) {
             silenceStartRef.current = Date.now();
           }
@@ -134,11 +149,11 @@ export function useSilenceTrigger(options: SilenceTriggerOptions) {
           setSilenceElapsedMs(Date.now() - silenceStartRef.current);
           if (
             !triggeredRef.current &&
-            Date.now() - silenceStartRef.current >= silenceMs
+            Date.now() - silenceStartRef.current >= silenceMsRef.current
           ) {
             triggeredRef.current = true;
             stopPromiseRef.current = stopExisting();
-            onSilence();
+            onSilenceRef.current();
           }
         } else {
           silenceStartRef.current = null;
@@ -158,7 +173,7 @@ export function useSilenceTrigger(options: SilenceTriggerOptions) {
       isActive = false;
       stopPromiseRef.current = stopExisting();
     };
-  }, [enabled, onSilence, sampleEveryMs, silenceDbThreshold, silenceMs]);
+  }, [enabled, sampleEveryMs]);
 
   return {
     meterDb,

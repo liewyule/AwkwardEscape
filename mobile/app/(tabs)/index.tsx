@@ -265,8 +265,6 @@ export default function HomeScreen() {
   const sessionRemainingMs = voiceGuardActive
     ? Math.max(sessionTotalMs - sessionElapsedMs, 0)
     : voiceGuardWindowMs;
-  const meterLabel =
-    voiceGuardActive && meterDb !== null ? `${Math.round(meterDb)} dB` : '-- dB';
   const buttonLabel = isCallProcessing ? 'Calling...' : 'Instant Call';
   const buttonHint = isHolding ? 'Keep holding...' : 'Hold for 2 seconds';
   const sessionLabel = isSessionProcessing
